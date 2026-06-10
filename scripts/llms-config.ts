@@ -52,6 +52,19 @@ export const SECTIONS: DocSection[] = [
         path: "CLAUDE.md",
       },
       {
+        title: "COPILOT.md",
+        description:
+          "GitHub Copilot CLI entry point: /plugin install one-liner, MCP wiring, the gbrain custom agent, troubleshooting.",
+        path: "COPILOT.md",
+      },
+      {
+        title: "docs/mcp/COPILOT_CLI.md",
+        description:
+          "Copilot CLI connection reference: plugin, local stdio mcp-config.json, remote bearer via gbrain connect --agent copilot, permissions.",
+        path: "docs/mcp/COPILOT_CLI.md",
+        includeInFull: false,
+      },
+      {
         title: "docs/architecture/KEY_FILES.md",
         description:
           "Per-file index for the gbrain repo: what each src/ file does + its load-bearing invariants. The on-demand detail CLAUDE.md's reference map routes to.",

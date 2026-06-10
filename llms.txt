@@ -8,6 +8,8 @@ Repo: https://github.com/jaypetez/gbrain-copilot
 
 - [AGENTS.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/AGENTS.md): Start here if you are not Claude Code. Install order, trust boundary, skill resolver, config/debug/migration pointers.
 - [CLAUDE.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/CLAUDE.md): Orientation + resolver. North Star, two axes, architecture + cross-cutting invariants, the reference map pointing at on-demand docs, and the inline ship IRON RULES.
+- [COPILOT.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/COPILOT.md): GitHub Copilot CLI entry point: /plugin install one-liner, MCP wiring, the gbrain custom agent, troubleshooting.
+- [docs/mcp/COPILOT_CLI.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/mcp/COPILOT_CLI.md): Copilot CLI connection reference: plugin, local stdio mcp-config.json, remote bearer via gbrain connect --agent copilot, permissions.
 - [docs/architecture/KEY_FILES.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/architecture/KEY_FILES.md): Per-file index for the gbrain repo: what each src/ file does + its load-bearing invariants. The on-demand detail CLAUDE.md's reference map routes to.
 - [docs/architecture/thin-client.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/architecture/thin-client.md): The thin-client / remote-MCP / cross-modal routing seam: isThinClient detection, callRemoteTool, SSRF-hardened URL validation, per-command routing.
 - [INSTALL_FOR_AGENTS.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/INSTALL_FOR_AGENTS.md): 9-step agent installation.

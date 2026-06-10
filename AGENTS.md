@@ -1,8 +1,10 @@
 # Agents working on GBrain
 
 This is your install + operating protocol. Claude Code reads `./CLAUDE.md` automatically.
-Everyone else (Codex, Cursor, OpenClaw, Aider, Continue, or an LLM fetching via URL):
-start here.
+**GitHub Copilot CLI:** [`./COPILOT.md`](./COPILOT.md) is your entry point (plugin
+install, MCP wiring, the `gbrain` agent); your platform also auto-loads this file
+as custom instructions when working in this repo. Everyone else (Codex, Cursor,
+OpenClaw, Aider, Continue, or an LLM fetching via URL): start here.
 
 ## Install (5 min)
 

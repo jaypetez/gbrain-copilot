@@ -14,8 +14,10 @@ Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/AGENTS.md
 # Agents working on GBrain
 
 This is your install + operating protocol. Claude Code reads `./CLAUDE.md` automatically.
-Everyone else (Codex, Cursor, OpenClaw, Aider, Continue, or an LLM fetching via URL):
-start here.
+**GitHub Copilot CLI:** [`./COPILOT.md`](./COPILOT.md) is your entry point (plugin
+install, MCP wiring, the `gbrain` agent); your platform also auto-loads this file
+as custom instructions when working in this repo. Everyone else (Codex, Cursor,
+OpenClaw, Aider, Continue, or an LLM fetching via URL): start here.
 
 ## Install (5 min)
 
@@ -913,6 +915,128 @@ Key routing rules:
 
 ---
 
+## COPILOT.md
+
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/COPILOT.md
+
+# GBrain for GitHub Copilot CLI
+
+This is the GitHub Copilot CLI entry point for **gbrain-copilot** — a
+self-sufficient fork of [garrytan/gbrain](https://github.com/garrytan/gbrain)
+(Garry Tan's agent brain, MIT) with Copilot CLI as a first-class platform.
+Everything installs and upgrades from this repo; you never need upstream.
+
+What you get inside Copilot CLI:
+
+- **30+ MCP tools** (`search`, `query`, `think`, `get_page`, `put_page`,
+  `find_experts`, graph traversal, timelines, …) served by `gbrain serve`.
+- **~50 Agent Skills** (`skills/*/SKILL.md`) — querying, capture, ingestion,
+  enrichment, briefings, daily tasks, schema authoring, reports.
+- **A `gbrain` custom agent** (`.github/agents/gbrain.agent.md`) that runs
+  the brain-first protocol: search the brain before answering, write back
+  what it learns, cite every claim.
+
+## Fastest path
+
+**1. Get the gbrain CLI on PATH** (one-time; installs Bun if missing, creates
+a local PGLite brain, wires the MCP config):
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/scripts/install-copilot.ps1 | iex
+```
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/scripts/install-copilot.sh | bash
+```
+
+**2. Install the plugin** (ships the skills + the gbrain agent + the MCP
+server entry in one step). Inside `copilot`:
+
+```
+/plugin install jaypetez/gbrain-copilot
+```
+
+**3. Verify.** `/mcp` should list `gbrain` as running. Then try:
+
+```
+search my brain for [any topic]
+```
+
+## Manual path
+
+```bash
+# install Bun, then:
+bun install -g github:jaypetez/gbrain-copilot
+gbrain init --pglite          # 2-second local brain, no server
+gbrain doctor                 # verify health
+```
+
+Then wire the MCP server using any one of: `/plugin install
+jaypetez/gbrain-copilot`, the interactive `/mcp add` form, or by merging
+this into `~/.copilot/mcp-config.json` (or `$COPILOT_HOME/mcp-config.json`):
+
+```json
+{
+  "mcpServers": {
+    "gbrain": { "type": "local", "command": "gbrain", "args": ["serve"], "tools": ["*"] }
+  }
+}
+```
+
+Full connection reference (local stdio, remote HTTP with bearer tokens,
+`gbrain connect --agent copilot`, permissions, troubleshooting):
+[`docs/mcp/COPILOT_CLI.md`](docs/mcp/COPILOT_CLI.md).
+
+Full agent-driven install (API keys, search-mode choice, import, dream
+cycle): [`INSTALL_FOR_AGENTS.md`](INSTALL_FOR_AGENTS.md).
+
+## How Copilot CLI uses gbrain
+
+| Surface | Where it comes from |
+|---|---|
+| MCP tools | `gbrain serve` (stdio), declared in mcp-config.json or via the plugin |
+| Agent Skills | `skills/` via the plugin, or copy to `~/.copilot/skills/` / your repo's `.github/skills/` |
+| `gbrain` custom agent | `.github/agents/gbrain.agent.md` via the plugin (select with `/agent`) |
+| Custom instructions | root `AGENTS.md` (auto-read by Copilot CLI in this repo) + `.github/copilot-instructions.md` |
+
+Pick ONE skills path (plugin OR manual copy) — installing both produces
+duplicate skill names.
+
+## Troubleshooting
+
+- **`/mcp` shows gbrain failed to start** → the gbrain CLI is not on PATH or
+  the brain is not initialized. Run the installer script above, then check
+  `gbrain --version` and `gbrain doctor`.
+- **`list_skills` errors over MCP** → enable skill publishing on the host:
+  `gbrain config set mcp.publish_skills true`. Core tools work regardless.
+- **Tool permission prompts** → pre-approve with
+  `copilot --allow-tool 'gbrain'` (or edit `~/.copilot/permissions-config.json`).
+- **Anything else** → `gbrain doctor --json` names the failing check and the
+  paste-ready fix.
+
+## Read order for agents
+
+1. `COPILOT.md` (this file) — Copilot CLI wiring.
+2. [`AGENTS.md`](AGENTS.md) — install + operating protocol (Copilot CLI
+   auto-loads this as custom instructions when working in this repo).
+3. [`CLAUDE.md`](CLAUDE.md) — architecture orientation (written for Claude
+   Code, accurate for everyone).
+4. [`skills/RESOLVER.md`](skills/RESOLVER.md) — skill dispatcher. Read
+   before any task.
+
+## Attribution
+
+GBrain is Garry Tan's work — [garrytan/gbrain](https://github.com/garrytan/gbrain),
+MIT. This fork adds GitHub Copilot CLI support (plugin manifest, custom
+agent, `gbrain connect --agent copilot`, installers, docs) and tracks
+upstream releases. Bugs in the Copilot integration belong
+[here](https://github.com/jaypetez/gbrain-copilot/issues); credit for
+everything else belongs upstream.
+
+---
+
 ## INSTALL_FOR_AGENTS.md
 
 Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/INSTALL_FOR_AGENTS.md
@@ -922,14 +1046,19 @@ Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/INSTALL_F
 Read this entire file, then follow the steps. Ask the user for API keys when needed.
 Target: ~30 minutes to a fully working brain.
 
-## Step 0: If you are not Claude Code
+## Step 0: Find your platform's entry point
 
-Read `AGENTS.md` at the repo root first. It's the non-Claude-agent operating
-protocol (install, read order, trust boundary, common tasks). Claude Code reads
-`CLAUDE.md` automatically and can skip ahead.
+- **Claude Code** reads `CLAUDE.md` automatically — skip ahead.
+- **GitHub Copilot CLI** — read `COPILOT.md` first (plugin install, MCP
+  wiring, the `gbrain` custom agent). Copilot CLI also auto-loads the root
+  `AGENTS.md` as custom instructions when working in this repo.
+- **Everyone else** (Codex, Cursor, OpenClaw, Aider, …) — read `AGENTS.md`,
+  the non-Claude-agent operating protocol (install, read order, trust
+  boundary, common tasks).
 
 If you fetched this file by URL without cloning yet, the companion files live at:
 - `https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/AGENTS.md` — start here
+- `https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/COPILOT.md` — GitHub Copilot CLI entry point
 - `https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/llms.txt` — full doc map
 - `https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/llms-full.txt` — same map, inlined
 
@@ -940,6 +1069,14 @@ Default path (Bun is required — gbrain is a Bun + TypeScript runtime):
 ```bash
 curl -fsSL https://bun.sh/install | bash
 export PATH="$HOME/.bun/bin:$PATH"
+bun install -g github:jaypetez/gbrain-copilot
+```
+
+On Windows (PowerShell):
+
+```powershell
+irm https://bun.sh/install.ps1 | iex
+$env:Path = "$env:USERPROFILE\.bun\bin;$env:Path"
 bun install -g github:jaypetez/gbrain-copilot
 ```
 
@@ -1135,6 +1272,23 @@ The three most important skills to adopt immediately:
 3. **Conventions** (`skills/conventions/quality.md`) — citation format, back-linking
    iron law, source attribution. These are non-negotiable quality rules.
 
+## Step 5.5: Wire your agent platform
+
+How the agent platform reaches the brain (MCP) and the skills:
+
+- **GitHub Copilot CLI** — one step inside `copilot`:
+  `/plugin install jaypetez/gbrain-copilot` registers the MCP server, all
+  skills, and the `gbrain` custom agent. Manual alternatives (mcp-config.json
+  entry, `/mcp add`, copying skills to `~/.copilot/skills/`) and the
+  installer scripts (`scripts/install-copilot.ps1|sh`) are documented in
+  `docs/mcp/COPILOT_CLI.md`. Pick ONE skills path (plugin or manual copy).
+- **Claude Code** — `claude mcp add gbrain -- gbrain serve`
+  (`docs/mcp/CLAUDE_CODE.md`).
+- **Codex** — `codex mcp add gbrain -- gbrain serve`, or remote via
+  `gbrain connect ... --agent codex --install` (`docs/mcp/CODEX.md`).
+- **Other MCP clients** — add `{"command": "gbrain", "args": ["serve"]}` to
+  the client's MCP config; per-client guides live under `docs/mcp/`.
+
 ## Step 6: Identity (optional)
 
 Run the soul-audit skill to customize the agent's identity:
@@ -1188,7 +1342,7 @@ gbrain upgrade                        # self-updates the binary, runs schema mig
 If you installed via `git clone + bun link`:
 
 ```bash
-cd ~/gbrain && git pull origin master && bun install
+cd ~/gbrain && git pull origin main && bun install
 gbrain apply-migrations --yes         # apply schema migrations (idempotent)
 gbrain post-upgrade                   # show migration notes for the version range
 ```
@@ -1420,7 +1574,17 @@ These apply to ALL brain-writing skills:
 
 Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/README.md
 
-# GBrain
+# GBrain for GitHub Copilot CLI
+
+> **This is gbrain-copilot** — a self-sufficient fork of
+> [garrytan/gbrain](https://github.com/garrytan/gbrain) with first-class
+> **GitHub Copilot CLI** support: a `/plugin install jaypetez/gbrain-copilot`
+> one-liner that ships 50+ Agent Skills, a `gbrain` custom agent, and the MCP
+> server; `gbrain connect --agent copilot`; Windows/macOS/Linux installer
+> scripts; and self-contained install + upgrade (you never need upstream).
+> **Copilot CLI users start at [`COPILOT.md`](COPILOT.md).** Everything below
+> is GBrain itself — Garry Tan's work, MIT, credited in
+> [Attribution](#attribution).
 
 **Search gives you raw pages. GBrain gives you the answer.** It's the brain layer your AI agent has been missing — the only one that does synthesis, graph traversal, and gap analysis in one box. Run a full autonomous agent on top of it, or just wire it into Claude Code or Codex as a supercharged retrieval layer in one command; either way your coding agent stops being amnesiac about everything that isn't code.
 
@@ -1439,7 +1603,7 @@ It's easier to ship a daemon that runs 24/7 to ingest, enrich, and consolidate t
 
 > **~30 minutes to a fully working brain.** Database ready in 2 seconds (PGLite, no server). You just answer questions about API keys.
 
-> **LLMs:** fetch [`llms.txt`](llms.txt) for the documentation map, or [`llms-full.txt`](llms-full.txt) for the same map with core docs inlined in one fetch. **Agents:** start with [`AGENTS.md`](AGENTS.md) (or [`CLAUDE.md`](CLAUDE.md) if you're Claude Code).
+> **LLMs:** fetch [`llms.txt`](llms.txt) for the documentation map, or [`llms-full.txt`](llms-full.txt) for the same map with core docs inlined in one fetch. **Agents:** start with [`AGENTS.md`](AGENTS.md) (or [`CLAUDE.md`](CLAUDE.md) if you're Claude Code, [`COPILOT.md`](COPILOT.md) if you're GitHub Copilot CLI).
 
 ## What this looks like
 
@@ -1507,6 +1671,21 @@ The agent installs GBrain, creates the brain, asks for your API keys, loads 43 s
 
 > **Never set up an AI agent platform before?** The [personal-brain tutorial](docs/tutorials/personal-brain.md) walks the whole path end-to-end — picking OpenClaw vs Hermes, deploying it, pointing it at INSTALL_FOR_AGENTS.md, getting the API keys, and verifying the first query. Start there if any of the above is new.
 
+### Quick start: GitHub Copilot CLI
+
+Run the installer (installs Bun + gbrain, creates a local brain, writes the MCP config), then install the plugin inside `copilot`:
+
+```powershell
+irm https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/scripts/install-copilot.ps1 | iex   # Windows
+# or: curl -fsSL https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/scripts/install-copilot.sh | bash
+```
+
+```
+/plugin install jaypetez/gbrain-copilot    # inside copilot: skills + gbrain agent + MCP server
+```
+
+Full walkthrough: [`COPILOT.md`](COPILOT.md) · connection reference: [`docs/mcp/COPILOT_CLI.md`](docs/mcp/COPILOT_CLI.md).
+
 ### Quick start: Claude Code or Codex
 
 Already running Claude Code or Codex? There are two ways to wire GBrain in, depending on what you want.
@@ -1523,6 +1702,7 @@ claude mcp add gbrain -- gbrain serve    # or: codex mcp add gbrain -- gbrain se
 ```bash
 gbrain connect https://your-host/mcp --token gbrain_xxx --install               # Claude Code
 gbrain connect https://your-host/mcp --token gbrain_xxx --agent codex --install # Codex
+gbrain connect https://your-host/mcp --token gbrain_xxx --agent copilot --install # GitHub Copilot CLI
 ```
 
 **[→ Full walkthrough: give your coding agent a memory](docs/tutorials/connect-coding-agent.md)** — both paths end to end, plus the brain-first protocol you paste into `CLAUDE.md` / `AGENTS.md` and the four habits that make it actually change how you work.
@@ -1554,6 +1734,7 @@ Postgres-at-scale, Supabase, and thin-client setup paths live in [`docs/INSTALL.
 
 GBrain exposes 30+ tools over MCP (stdio and HTTP). The specific snippet depends on which client you use:
 
+- **[GitHub Copilot CLI](docs/mcp/COPILOT_CLI.md)** — one step: `/plugin install jaypetez/gbrain-copilot` (MCP server + skills + the `gbrain` agent). Or local stdio via `~/.copilot/mcp-config.json` / `/mcp add`; remote via `gbrain connect https://your-host/mcp --token gbrain_xxx --agent copilot --install`.
 - **[Claude Code](docs/mcp/CLAUDE_CODE.md)** — local: one command, `claude mcp add gbrain -- gbrain serve` (zero server, zero tunnel). Remote with just a bearer token: `gbrain connect https://your-host/mcp --token gbrain_xxx` prints a paste-ready block (or `--install` wires it up and smoke-tests the token).
 - **[Codex](docs/mcp/CODEX.md)** — `gbrain connect https://your-host/mcp --token gbrain_xxx --agent codex` (or `--install`). Codex reads the bearer from `$GBRAIN_REMOTE_TOKEN` at runtime, so the token never lands in Codex config.
 - **[Cursor / Windsurf / any stdio MCP client](docs/mcp/CLAUDE_CODE.md)** — same shape, add `{"command": "gbrain", "args": ["serve"]}` to your MCP config.
@@ -1854,6 +2035,10 @@ Run `bun run test` for the fast loop, `bun run verify` for the pre-push gate, `b
 Community PRs are batched into release waves rather than merged one-by-one — see the "PR wave workflow" section in [`CLAUDE.md`](CLAUDE.md). Contributor attribution stays attached via `Co-Authored-By:` trailers. We credit every accepted contribution in [`CHANGELOG.md`](CHANGELOG.md).
 
 If you find a bug or want a feature: open an issue first. Quick fixes (typo, doc bug, obvious regression) can go straight to a PR. Anything touching schema, retrieval ranking, MCP protocol, or the security boundary needs a design discussion in the issue first.
+
+## Attribution
+
+gbrain-copilot is a fork of [garrytan/gbrain](https://github.com/garrytan/gbrain) by Garry Tan (MIT). All credit for GBrain's design and implementation — the engine, the search stack, the knowledge graph, the skills, everything described above — belongs to the upstream project. This fork adds the GitHub Copilot CLI integration layer (plugin manifest, `gbrain` custom agent, `gbrain connect --agent copilot`, installer scripts, Copilot docs) and self-contained install/upgrade coordinates. Issues with the Copilot integration go [here](https://github.com/jaypetez/gbrain-copilot/issues); everything else is upstream's craft.
 
 ## License + credit
 
