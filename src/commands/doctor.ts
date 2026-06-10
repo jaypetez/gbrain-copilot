@@ -1,5 +1,6 @@
 import type { BrainEngine } from '../core/engine.ts';
 import * as db from '../core/db.ts';
+import { GITHUB_URL } from '../core/repo-coordinates.ts';
 import { LATEST_VERSION, getIdleBlockers } from '../core/migrate.ts';
 import { checkResolvable } from '../core/check-resolvable.ts';
 import { autoFixDryViolations, type AutoFixReport, type FixOutcome } from '../core/dry-fix.ts';
@@ -5075,7 +5076,7 @@ export async function buildChecks(
         name: 'schema_version',
         status: 'fail',
         message: `No schema version recorded. Migrations never ran. Fix: gbrain apply-migrations --yes. ` +
-                 `If you installed via 'bun install -g github:...', see https://github.com/garrytan/gbrain/issues/218.`,
+                 `If you installed via 'bun install -g github:...', see ${GITHUB_URL}#install (upstream context: garrytan/gbrain#218).`,
       });
     } else {
       checks.push({

@@ -3,8 +3,8 @@
 ## Setup
 
 ```bash
-git clone https://github.com/garrytan/gbrain.git
-cd gbrain
+git clone https://github.com/jaypetez/gbrain-copilot.git
+cd gbrain-copilot
 bun install
 bun test
 ```

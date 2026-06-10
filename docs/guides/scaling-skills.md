@@ -304,7 +304,7 @@ capability. You're organizing, not deleting.
 - [Sub-agent routing](sub-agent-routing.md) — when to delegate to a
   sub-agent vs handle in-line, and the model routing table for each path.
 
-GBrain: [github.com/garrytan/gbrain](https://github.com/garrytan/gbrain).
+GBrain: [github.com/jaypetez/gbrain-copilot](https://github.com/jaypetez/gbrain-copilot).
 The `parseResolverEntries` parser lives at
 [`src/core/check-resolvable.ts`](../../src/core/check-resolvable.ts);
 the bundled resolver lives at [`skills/RESOLVER.md`](../../skills/RESOLVER.md).

@@ -22,6 +22,7 @@
  */
 
 import { embed as aiEmbed, embedMany, generateObject, generateText, jsonSchema } from 'ai';
+import { ISSUES_URL } from '../repo-coordinates.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { listRecipes } from './recipes/index.ts';
 import { createOpenAI } from '@ai-sdk/openai';
@@ -586,7 +587,7 @@ function requireConfig(): AIGatewayConfig {
   if (!_config) {
     throw new AIConfigError(
       'AI gateway is not configured. Call configureGateway() during engine connect.',
-      'This is a gbrain bug — file an issue at https://github.com/garrytan/gbrain/issues',
+      `This is a gbrain bug — file an issue at ${ISSUES_URL}`,
     );
   }
   return _config;

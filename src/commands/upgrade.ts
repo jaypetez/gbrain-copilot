@@ -2,8 +2,7 @@ import { execSync, execFileSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, realpathSync } from 'fs';
 import { basename, join, dirname, resolve } from 'path';
 import { VERSION } from '../version.ts';
-
-const GBRAIN_GITHUB_REPO = 'garrytan/gbrain';
+import { ACCEPTED_REPO_SLUGS, GITHUB_URL, RELEASES_URL } from '../core/repo-coordinates.ts';
 
 export async function runUpgrade(args: string[]) {
   if (args.includes('--help') || args.includes('-h')) {
@@ -65,17 +64,17 @@ export async function runUpgrade(args: string[]) {
       } else if (result.reason === 'unsupported_platform' || result.reason === 'no_asset') {
         console.log('No published binary for this platform/arch.');
         console.log('Download the latest binary from GitHub Releases:');
-        console.log('  https://github.com/garrytan/gbrain/releases');
+        console.log(`  ${RELEASES_URL}`);
       } else {
         console.error(`Binary self-update failed (${result.reason}${result.error ? `: ${result.error}` : ''}).`);
         console.error('Your existing binary is unchanged. Download manually if needed:');
-        console.error('  https://github.com/garrytan/gbrain/releases');
+        console.error(`  ${RELEASES_URL}`);
         recordUpgradeError({
           phase: 'binary-self-update',
           fromVersion: oldVersion,
           toVersion: '',
           error: `${result.reason}${result.error ? `: ${result.error}` : ''}`,
-          hint: 'Download from https://github.com/garrytan/gbrain/releases',
+          hint: `Download from ${RELEASES_URL}`,
         });
       }
       break;
@@ -96,7 +95,7 @@ export async function runUpgrade(args: string[]) {
       console.log('Try one of:');
       console.log('  bun update gbrain');
       console.log('  clawhub update gbrain');
-      console.log('  Download from https://github.com/garrytan/gbrain/releases');
+      console.log(`  Download from ${RELEASES_URL}`);
   }
 
   if (upgraded) {
@@ -722,8 +721,8 @@ function detectBunLink(): { repoRoot: string } | null {
       const gitConfigPath = join(dir, '.git', 'config');
       if (existsSync(gitConfigPath)) {
         try {
-          const cfg = readFileSync(gitConfigPath, 'utf-8');
-          if (cfg.toLowerCase().includes(GBRAIN_GITHUB_REPO.toLowerCase())) {
+          const cfg = readFileSync(gitConfigPath, 'utf-8').toLowerCase();
+          if (ACCEPTED_REPO_SLUGS.some((slug) => cfg.includes(slug.toLowerCase()))) {
             return { repoRoot: dir };
           }
         } catch { /* unreadable config — not our case */ }
@@ -768,10 +767,10 @@ function classifyBunInstall(): 'canonical' | 'suspect' {
       if (existsSync(pkgPath)) {
         try {
           const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-          const repoUrl = (typeof pkg.repository === 'string'
+          const repoUrl = ((typeof pkg.repository === 'string'
             ? pkg.repository
-            : pkg.repository?.url) ?? '';
-          if (repoUrl.toLowerCase().includes(GBRAIN_GITHUB_REPO.toLowerCase())) {
+            : pkg.repository?.url) ?? '').toLowerCase();
+          if (ACCEPTED_REPO_SLUGS.some((slug) => repoUrl.includes(slug.toLowerCase()))) {
             return 'canonical';
           }
           // Source-marker fallback: our published-as-source install always
@@ -796,18 +795,18 @@ function classifyBunInstall(): 'canonical' | 'suspect' {
 
 function printSquatterRecovery(): void {
   console.warn('');
-  console.warn('  WARNING: gbrain install does not appear to be from garrytan/gbrain.');
+  console.warn(`  WARNING: gbrain install does not appear to be from ${ACCEPTED_REPO_SLUGS.join(' or ')}.`);
   console.warn('  This is likely the npm-name collision tracked in issue #658:');
   console.warn('    https://www.npmjs.com/package/gbrain (an unrelated package).');
   console.warn('');
   console.warn('  Recovery options:');
   console.warn('    1. Install from source:');
   console.warn('         bun remove -g gbrain');
-  console.warn('         git clone https://github.com/garrytan/gbrain.git');
-  console.warn('         cd gbrain && bun install && bun link');
+  console.warn(`         git clone ${GITHUB_URL}.git`);
+  console.warn('         cd gbrain-copilot && bun install && bun link');
   console.warn('');
   console.warn('    2. Download a release binary:');
-  console.warn('         https://github.com/garrytan/gbrain/releases');
+  console.warn(`         ${RELEASES_URL}`);
   console.warn('');
   console.warn('  See docs/INSTALL_FOR_AGENTS.md for the canonical install paths.');
   console.warn('');

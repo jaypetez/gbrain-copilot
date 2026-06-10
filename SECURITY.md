@@ -3,7 +3,7 @@
 ## Reporting Vulnerabilities
 
 If you discover a security issue in GBrain, please report it privately by opening
-a [private security advisory](https://github.com/garrytan/gbrain/security/advisories/new)
+a [private security advisory](https://github.com/jaypetez/gbrain-copilot/security/advisories/new)
 on GitHub.
 
 Do not open a public issue for security vulnerabilities.

@@ -245,7 +245,7 @@ warns about a partial migration:
    gbrain stats
    ```
 4. **If any step fails or the numbers look wrong,** please file an issue:
-   https://github.com/garrytan/gbrain/issues with:
+   https://github.com/jaypetez/gbrain-copilot/issues with:
    - output of `gbrain doctor`
    - contents of `~/.gbrain/upgrade-errors.jsonl` if it exists
    - which step broke
@@ -417,11 +417,11 @@ before running CI:
 1. `gh pr checkout <N>` — pull down the fork's branch. Note the PR number and
    head branch name (`gh pr view <N> --json headRefName --jq .headRefName`).
 2. `git push origin HEAD:<branch-name>` — push the same branch to the base
-   repo (origin points at `garrytan/gbrain`, not the fork). This is the move
+   repo (origin points at `jaypetez/gbrain-copilot`, not the fork). This is the move
    that gives CI access to secrets.
 3. `gh pr close <N> --comment "moving to base-repo branch for secret access"`
    — close the fork PR so the queue stays clean.
-4. `gh pr create --base master --head <branch-name>` — open the replacement
+4. `gh pr create --base main --head <branch-name>` — open the replacement
    PR from the base-repo branch. **Preserve the original PR's title and body
    verbatim** (`gh pr view <N> --json title,body`); contributor attribution
    moves to a `Co-Authored-By:` trailer if needed.

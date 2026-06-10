@@ -267,4 +267,4 @@ Where to go next:
 - **Set up the dream cycle** properly. The autopilot daemon runs overnight enrichment by default but you can tune what it does. See [`docs/architecture/`](../architecture/) for the full cycle reference.
 - **Add a teammate to your brain**, or stand the whole thing up as a company brain. See the [company brain tutorial](company-brain.md) for the multi-user walkthrough.
 
-Questions, gotchas, or wins worth sharing? Open an issue at [github.com/garrytan/gbrain](https://github.com/garrytan/gbrain/issues).
+Questions, gotchas, or wins worth sharing? Open an issue at [github.com/jaypetez/gbrain-copilot](https://github.com/jaypetez/gbrain-copilot/issues).

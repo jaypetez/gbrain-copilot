@@ -39,6 +39,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { IngestionSource } from './types.ts';
+import { DEFAULT_BRANCH, GITHUB_URL } from '../repo-coordinates.ts';
 import { INGESTION_SOURCE_API_VERSION } from './types.ts';
 
 /** Currently-supported api_version values. Reverse aliases for older
@@ -200,7 +201,7 @@ export async function loadSkillpackSources(
             `against a different contract version. Fix: upgrade the ` +
             `skillpack (publisher needs to rebuild against the new ` +
             `IngestionSource contract) OR downgrade gbrain. Skillpack docs: ` +
-            `https://github.com/garrytan/gbrain/blob/master/docs/ingestion-source-skillpack.md`,
+            `${GITHUB_URL}/blob/${DEFAULT_BRANCH}/docs/ingestion-source-skillpack.md`,
         );
         continue;
       }

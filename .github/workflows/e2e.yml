@@ -1,12 +1,8 @@
 name: E2E Tests
 
 on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
-  schedule:
-    - cron: '0 6 * * *'  # Nightly at 6am UTC
+  # E2E needs API-key secrets (OPENAI/ANTHROPIC/ZEROENTROPY) that this fork
+  # does not configure; run manually once secrets exist.
   workflow_dispatch:
 
 permissions:

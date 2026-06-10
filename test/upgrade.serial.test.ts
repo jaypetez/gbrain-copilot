@@ -77,9 +77,11 @@ describe('detectInstallMethod heuristic (source analysis)', () => {
   });
 
   // v0.28.5 cluster D: 3-signal layered detection.
-  test('bun-link signal walks .git/config for garrytan/gbrain match', () => {
+  // Fork: the repo constant moved to repo-coordinates.ts and both the fork
+  // and upstream slugs are accepted (ACCEPTED_REPO_SLUGS).
+  test('bun-link signal walks .git/config for an accepted repo-slug match', () => {
     expect(source).toContain('function detectBunLink');
-    expect(source).toContain('GBRAIN_GITHUB_REPO');
+    expect(source).toContain('ACCEPTED_REPO_SLUGS');
     expect(source).toContain('toLowerCase()');
   });
 
@@ -125,7 +127,7 @@ describe('detectInstallMethod heuristic (source analysis)', () => {
   test('squatter recovery message names both source-clone AND release-binary paths', () => {
     expect(source).toContain('printSquatterRecovery');
     expect(source).toContain('git clone');
-    expect(source).toContain('releases');
+    expect(source).toContain('RELEASES_URL');
     expect(source).toContain('#658');
   });
 });

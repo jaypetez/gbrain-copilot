@@ -27,6 +27,7 @@
 import { chmodSync, closeSync, fsyncSync, openSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { RELEASES_API_URL } from './repo-coordinates.ts';
 
 export interface ReleaseAsset {
   name: string;
@@ -82,7 +83,7 @@ export interface BinarySelfUpdateDeps {
 
 async function defaultFetchRelease(): Promise<{ tag: string; assets: ReleaseAsset[] } | null> {
   try {
-    const res = await fetch('https://api.github.com/repos/garrytan/gbrain/releases/latest', {
+    const res = await fetch(RELEASES_API_URL, {
       headers: { 'User-Agent': 'gbrain-self-upgrade' },
       signal: AbortSignal.timeout(5_000),
     });

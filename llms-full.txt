@@ -3,13 +3,13 @@
 > GBrain is a personal knowledge brain and GStack mod for agent platforms. Pluggable engines (PGLite default, Postgres+pgvector for scale), contract-first operations, 26 fat-markdown skills. Teaches agents brain ops, ingestion, enrichment, scheduling, identity, and access control.
 
 This file concatenates core GBrain documentation for single-fetch ingestion.
-For the link-only index, see `llms.txt`. Source of truth: https://github.com/garrytan/gbrain.
+For the link-only index, see `llms.txt`. Source of truth: https://github.com/jaypetez/gbrain-copilot.
 
 # Core entry points
 
 ## AGENTS.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/AGENTS.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/AGENTS.md
 
 # Agents working on GBrain
 
@@ -23,12 +23,12 @@ start here.
    ```bash
    curl -fsSL https://bun.sh/install | bash
    export PATH="$HOME/.bun/bin:$PATH"
-   bun install -g github:garrytan/gbrain
+   bun install -g github:jaypetez/gbrain-copilot
    ```
    If `bun install -g` aborts or `gbrain doctor` reports `schema_version: 0`,
    the CLI prints a recovery hint pointing at [#218](https://github.com/garrytan/gbrain/issues/218).
    Run `gbrain apply-migrations --yes` to recover, or fall back to the
-   deterministic install: `git clone https://github.com/garrytan/gbrain.git ~/gbrain && cd ~/gbrain && bun install && bun link`.
+   deterministic install: `git clone https://github.com/jaypetez/gbrain-copilot.git ~/gbrain && cd ~/gbrain && bun install && bun link`.
 2. Init the brain: `gbrain init` (defaults to PGLite, zero-config). For 1000+ files or
    multi-machine sync, init suggests Postgres + pgvector via Supabase.
 3. **STOP — ask the user about search mode.** `gbrain init` auto-applied a
@@ -144,7 +144,7 @@ publishing: `LLMS_REPO_BASE=https://raw.githubusercontent.com/your-org/your-fork
 
 ## CLAUDE.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/CLAUDE.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/CLAUDE.md
 
 # CLAUDE.md
 
@@ -915,7 +915,7 @@ Key routing rules:
 
 ## INSTALL_FOR_AGENTS.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/INSTALL_FOR_AGENTS.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/INSTALL_FOR_AGENTS.md
 
 # GBrain Installation Guide for AI Agents
 
@@ -929,9 +929,9 @@ protocol (install, read order, trust boundary, common tasks). Claude Code reads
 `CLAUDE.md` automatically and can skip ahead.
 
 If you fetched this file by URL without cloning yet, the companion files live at:
-- `https://raw.githubusercontent.com/garrytan/gbrain/master/AGENTS.md` — start here
-- `https://raw.githubusercontent.com/garrytan/gbrain/master/llms.txt` — full doc map
-- `https://raw.githubusercontent.com/garrytan/gbrain/master/llms-full.txt` — same map, inlined
+- `https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/AGENTS.md` — start here
+- `https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/llms.txt` — full doc map
+- `https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/llms-full.txt` — same map, inlined
 
 ## Step 1: Install GBrain
 
@@ -940,7 +940,7 @@ Default path (Bun is required — gbrain is a Bun + TypeScript runtime):
 ```bash
 curl -fsSL https://bun.sh/install | bash
 export PATH="$HOME/.bun/bin:$PATH"
-bun install -g github:garrytan/gbrain
+bun install -g github:jaypetez/gbrain-copilot
 ```
 
 Verify: `gbrain --version` should print a version number. If `gbrain` is not found,
@@ -953,7 +953,7 @@ restart the shell or add the PATH export to the shell profile.
 > to recover. If that doesn't work, fall back to the deterministic install path:
 >
 > ```bash
-> git clone https://github.com/garrytan/gbrain.git ~/gbrain && cd ~/gbrain
+> git clone https://github.com/jaypetez/gbrain-copilot.git ~/gbrain && cd ~/gbrain
 > bun install && bun link
 > ```
 
@@ -1276,7 +1276,7 @@ Init + upgrade banners auto-skip in non-TTY too.
 
 ## skills/RESOLVER.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/skills/RESOLVER.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/skills/RESOLVER.md
 
 # GBrain Skill Resolver
 
@@ -1418,7 +1418,7 @@ These apply to ALL brain-writing skills:
 
 ## README.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/README.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/README.md
 
 # GBrain
 
@@ -1500,7 +1500,7 @@ Then paste this into your agent:
 
 ```
 Retrieve and follow the instructions at:
-https://raw.githubusercontent.com/garrytan/gbrain/master/INSTALL_FOR_AGENTS.md
+https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/INSTALL_FOR_AGENTS.md
 ```
 
 The agent installs GBrain, creates the brain, asks for your API keys, loads 43 skills, configures the dream cycle, and verifies the install end-to-end. ~30 minutes. You answer questions, it does the work.
@@ -1533,7 +1533,7 @@ Want the whole thing — local brain, 43 skills, the overnight dream cycle that 
 
 ```
 Retrieve and follow the instructions at:
-https://raw.githubusercontent.com/garrytan/gbrain/master/INSTALL_FOR_AGENTS.md
+https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/INSTALL_FOR_AGENTS.md
 ```
 
 This works in any agent that can read files over HTTPS and execute shell commands. Tested with Codex, Claude Code, Claude Cowork, Cursor, and AlphaClaw.
@@ -1541,7 +1541,7 @@ This works in any agent that can read files over HTTPS and execute shell command
 ### CLI standalone (no agent)
 
 ```bash
-bun install -g github:garrytan/gbrain
+bun install -g github:jaypetez/gbrain-copilot
 gbrain init --pglite     # 2 seconds; no server, no Docker
 gbrain doctor            # verify health
 gbrain import ~/notes/   # index your markdown
@@ -1655,7 +1655,7 @@ Step-by-step walkthroughs for getting the most out of GBrain. Each one takes you
 
 More walkthroughs in progress: connecting an existing agent (Claude Code, Cursor, OpenClaw, Hermes) to a GBrain memory layer; setting up GBrain for VC dealflow with founder scorecards and meeting prep; migrating an existing Notion or Obsidian vault; indexing a codebase as a queryable code brain. Full tutorial index: [`docs/tutorials/`](docs/tutorials/).
 
-Want to see a tutorial that isn't here yet? [Open an issue](https://github.com/garrytan/gbrain/issues) describing the workflow you want documented.
+Want to see a tutorial that isn't here yet? [Open an issue](https://github.com/jaypetez/gbrain-copilot/issues) describing the workflow you want documented.
 
 ## What it does (the loop)
 
@@ -1869,7 +1869,7 @@ Community PR contributors are credited in `CHANGELOG.md` per release. ZeroEntrop
 
 ## docs/ENGINES.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/ENGINES.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/ENGINES.md
 
 # Pluggable Engine Architecture
 
@@ -2110,7 +2110,7 @@ Note: The original SQLite engine plan (`docs/SQLITE_ENGINE.md`) was superseded b
 
 ## docs/what-schemas-unlock.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/what-schemas-unlock.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/what-schemas-unlock.md
 
 # What schemas unlock
 
@@ -2294,7 +2294,7 @@ That's what we built. Try it on a corpus you actually have and the numbers go up
 
 ## docs/schema-author-tutorial.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/schema-author-tutorial.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/schema-author-tutorial.md
 
 # Tutorial: Build your first schema pack
 
@@ -2525,7 +2525,7 @@ gbrain schema lint --with-db
 
 ## docs/guides/live-sync.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/live-sync.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/live-sync.md
 
 # Live Sync: Keep the Index Current
 
@@ -2685,7 +2685,7 @@ hashes match. If both a cron and `--watch` fire simultaneously, no conflict.
 
 ## docs/guides/cron-schedule.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/cron-schedule.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/cron-schedule.md
 
 # Reference Cron Schedule
 
@@ -2885,7 +2885,7 @@ echo "Dream cycle complete at $(date)"
 
 ## docs/guides/quiet-hours.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/quiet-hours.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/quiet-hours.md
 
 # Quiet Hours and Timezone-Aware Delivery
 
@@ -3057,7 +3057,7 @@ Set `enabled: false` to disable quiet hours entirely (e.g., for 24/7 monitoring)
 
 ## docs/guides/scaling-skills.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/scaling-skills.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/scaling-skills.md
 
 # Scaling skills past 300 without drowning the context window
 
@@ -3365,7 +3365,7 @@ capability. You're organizing, not deleting.
 - [Sub-agent routing](sub-agent-routing.md) — when to delegate to a
   sub-agent vs handle in-line, and the model routing table for each path.
 
-GBrain: [github.com/garrytan/gbrain](https://github.com/garrytan/gbrain).
+GBrain: [github.com/jaypetez/gbrain-copilot](https://github.com/jaypetez/gbrain-copilot).
 The `parseResolverEntries` parser lives at
 [`src/core/check-resolvable.ts`](../../src/core/check-resolvable.ts);
 the bundled resolver lives at [`skills/RESOLVER.md`](../../skills/RESOLVER.md).
@@ -3374,7 +3374,7 @@ the bundled resolver lives at [`skills/RESOLVER.md`](../../skills/RESOLVER.md).
 
 ## docs/mcp/DEPLOY.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/mcp/DEPLOY.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/mcp/DEPLOY.md
 
 # Deploy GBrain Remote MCP Server
 
@@ -3669,7 +3669,7 @@ built-in server is the recommended path.
 
 ## docs/GBRAIN_VERIFY.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/GBRAIN_VERIFY.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/GBRAIN_VERIFY.md
 
 # GBrain Installation Verification Runbook
 
@@ -3971,7 +3971,7 @@ end-to-end sync test (4c), push a real change and verify it appears in search.
 
 ## docs/guides/minions-fix.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/minions-fix.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/minions-fix.md
 
 # Minions fix — repairing a half-migrated install
 
@@ -4137,7 +4137,7 @@ Each phase is idempotent. Re-running is safe. Common failure modes:
 
 ## docs/integrations/reliability-repair.md
 
-Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/integrations/reliability-repair.md
+Source: https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/integrations/reliability-repair.md
 
 # Reliability repair (v0.12.2)
 

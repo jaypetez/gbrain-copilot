@@ -388,7 +388,7 @@ Recommended path for each teammate: the thin-client install. On their machine:
 
 ```bash
 curl -fsSL https://bun.sh/install | bash
-bun install -g github:garrytan/gbrain
+bun install -g github:jaypetez/gbrain-copilot
 
 gbrain init --mcp-only \
   --issuer-url https://brain.acme-co.com \
@@ -554,4 +554,4 @@ What to do next:
 
 If you're building in this space (which YC has flagged as the [company-brain category in its Request for Startups](https://www.ycombinator.com/rfs#company-brain)), you might as well build on this. Everything described above is open source, MIT licensed, and what I run in production behind my own AI agents.
 
-Questions, gotchas, or wins worth sharing? Open an issue at [github.com/garrytan/gbrain](https://github.com/garrytan/gbrain/issues).
+Questions, gotchas, or wins worth sharing? Open an issue at [github.com/jaypetez/gbrain-copilot](https://github.com/jaypetez/gbrain-copilot/issues).

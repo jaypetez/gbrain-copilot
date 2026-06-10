@@ -8,6 +8,7 @@ import {
   semverLte,
 } from '../core/semver.ts';
 import { writeUpdateCache, type UpdateMarker } from '../core/self-upgrade.ts';
+import { RAW_BASE_URL, RELEASES_API_URL } from '../core/repo-coordinates.ts';
 
 /** Best-effort cache write — a read-only ~/.gbrain must never make the check throw. */
 function safeWriteCache(marker: UpdateMarker): void {
@@ -51,7 +52,7 @@ function upgradeCommandForMethod(method: string): string {
  */
 export async function fetchLatestRelease(): Promise<{ tag: string; published_at: string; url: string } | null> {
   try {
-    const res = await fetch('https://api.github.com/repos/garrytan/gbrain/releases/latest', {
+    const res = await fetch(RELEASES_API_URL, {
       headers: { 'User-Agent': `gbrain/${VERSION}` },
       signal: AbortSignal.timeout(5_000),
     });
@@ -69,7 +70,7 @@ export async function fetchLatestRelease(): Promise<{ tag: string; published_at:
 
 export async function fetchChangelog(currentVersion: string, latestVersion: string): Promise<string> {
   try {
-    const res = await fetch('https://raw.githubusercontent.com/garrytan/gbrain/master/CHANGELOG.md', {
+    const res = await fetch(`${RAW_BASE_URL}/CHANGELOG.md`, {
       signal: AbortSignal.timeout(5_000),
     });
     if (!res.ok) return '';

@@ -10,9 +10,9 @@ protocol (install, read order, trust boundary, common tasks). Claude Code reads
 `CLAUDE.md` automatically and can skip ahead.
 
 If you fetched this file by URL without cloning yet, the companion files live at:
-- `https://raw.githubusercontent.com/garrytan/gbrain/master/AGENTS.md` — start here
-- `https://raw.githubusercontent.com/garrytan/gbrain/master/llms.txt` — full doc map
-- `https://raw.githubusercontent.com/garrytan/gbrain/master/llms-full.txt` — same map, inlined
+- `https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/AGENTS.md` — start here
+- `https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/llms.txt` — full doc map
+- `https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/llms-full.txt` — same map, inlined
 
 ## Step 1: Install GBrain
 
@@ -21,7 +21,7 @@ Default path (Bun is required — gbrain is a Bun + TypeScript runtime):
 ```bash
 curl -fsSL https://bun.sh/install | bash
 export PATH="$HOME/.bun/bin:$PATH"
-bun install -g github:garrytan/gbrain
+bun install -g github:jaypetez/gbrain-copilot
 ```
 
 Verify: `gbrain --version` should print a version number. If `gbrain` is not found,
@@ -34,7 +34,7 @@ restart the shell or add the PATH export to the shell profile.
 > to recover. If that doesn't work, fall back to the deterministic install path:
 >
 > ```bash
-> git clone https://github.com/garrytan/gbrain.git ~/gbrain && cd ~/gbrain
+> git clone https://github.com/jaypetez/gbrain-copilot.git ~/gbrain && cd ~/gbrain
 > bun install && bun link
 > ```
 

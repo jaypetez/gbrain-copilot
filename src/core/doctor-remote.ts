@@ -13,6 +13,7 @@
  */
 
 import type { GBrainConfig } from './config.ts';
+import { RELEASES_URL } from './repo-coordinates.ts';
 import { discoverOAuth, mintClientCredentialsToken, smokeTestMcp } from './remote-mcp-probe.ts';
 import { callRemoteTool, RemoteMcpError, unpackToolResult } from './mcp-client.ts';
 import { safeCompare, driftLevel, loadPromptState } from './thin-client-upgrade-prompt.ts';
@@ -395,7 +396,7 @@ export async function runUpgradeDriftCheck(config: GBrainConfig): Promise<Remote
   } catch { /* state read is best-effort */ }
 
   const fixHint = priorFailed
-    ? `Prior \`gbrain upgrade\` did not advance the binary. See https://github.com/garrytan/gbrain/releases for manual install.`
+    ? `Prior \`gbrain upgrade\` did not advance the binary. See ${RELEASES_URL} for manual install.`
     : `Run \`gbrain upgrade\` to install v${remoteVersion}.`;
 
   return {

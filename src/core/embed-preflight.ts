@@ -18,6 +18,7 @@
  */
 
 import { diagnoseEmbedding, type EmbeddingDiagnosis } from './ai/gateway.ts';
+import { ISSUES_URL } from './repo-coordinates.ts';
 
 /**
  * Tagged error thrown by validateEmbeddingCreds. CLI catch sites format
@@ -63,7 +64,7 @@ export function formatEmbeddingCredsError(d: EmbeddingDiagnosis): string {
       return [
         'Embedding gateway is not configured.',
         'This is usually a startup-order bug. Re-run with --no-embed to import',
-        'without embedding, then file an issue at https://github.com/garrytan/gbrain/issues',
+        `without embedding, then file an issue at ${ISSUES_URL}`,
       ].join('\n');
 
     case 'no_model_configured':
