@@ -27,6 +27,14 @@ $repo = 'github:jaypetez/gbrain-copilot'
 
 function Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 
+# Run a native command via cmd so stderr (bun/gbrain progress output) merges
+# into stdout as plain text instead of becoming a terminating ErrorRecord
+# under $ErrorActionPreference='Stop' (PowerShell 5.1 behavior). Returns the
+# native exit code in $LASTEXITCODE.
+function Invoke-Native([string]$CommandLine) {
+  cmd /c "$CommandLine 2>&1" | ForEach-Object { Write-Host $_ }
+}
+
 # --- 1. Bun ---------------------------------------------------------------
 Step 'Checking for Bun'
 $bun = Get-Command bun -ErrorAction SilentlyContinue
@@ -42,27 +50,28 @@ Write-Host "Bun $(bun --version)"
 
 # --- 2. gbrain ------------------------------------------------------------
 Step "Installing gbrain ($repo)"
-bun install -g $repo
+Invoke-Native "bun install -g $repo"
+if ($LASTEXITCODE -ne 0) { throw "bun install -g $repo failed (transient EPERM on Windows? re-run this script)." }
 $gbrain = Get-Command gbrain -ErrorAction SilentlyContinue
 if ($null -eq $gbrain) {
   $env:Path = "$env:USERPROFILE\.bun\bin;$env:Path"
   $gbrain = Get-Command gbrain -ErrorAction SilentlyContinue
 }
 if ($null -eq $gbrain) { throw 'gbrain not found on PATH after install. Run `bun pm bin -g` to find the bin dir and add it to PATH.' }
-Write-Host "gbrain $(gbrain --version)"
+Invoke-Native 'gbrain --version'
 
 # Bun sometimes skips the postinstall hook on global installs — run the
 # migrations explicitly (idempotent; no-op on a fresh install with no brain).
 Step 'Applying schema migrations (idempotent)'
-gbrain apply-migrations --yes --non-interactive
-if (-not $?) { Write-Warning 'apply-migrations reported an issue; `gbrain doctor` will diagnose after init.' }
+Invoke-Native 'gbrain apply-migrations --yes --non-interactive'
+if ($LASTEXITCODE -ne 0) { Write-Warning 'apply-migrations reported an issue; `gbrain doctor` will diagnose after init.' }
 
 # --- 3. Brain -------------------------------------------------------------
 if (-not $SkipInit) {
   Step 'Creating the brain (PGLite, local, no server)'
   Write-Host 'NOTE: init may ask about embedding providers and search mode — answer the prompts.'
-  if ($Yes) { gbrain init --pglite --yes } else { gbrain init --pglite }
-  if (-not $?) { Write-Warning 'gbrain init did not complete cleanly; run `gbrain doctor` for the fix.' }
+  if ($Yes) { Invoke-Native 'gbrain init --pglite --yes' } else { Invoke-Native 'gbrain init --pglite' }
+  if ($LASTEXITCODE -ne 0) { Write-Warning 'gbrain init did not complete cleanly; run `gbrain doctor` for the fix.' }
 } else {
   Step 'Skipping gbrain init (-SkipInit)'
 }
@@ -121,7 +130,7 @@ if ($CopySkills) {
 
 # --- 6. Verify + next steps --------------------------------------------------
 Step 'Health check'
-gbrain doctor
+Invoke-Native 'gbrain doctor'
 
 Write-Host ''
 Write-Host '=============================================================' -ForegroundColor Green
