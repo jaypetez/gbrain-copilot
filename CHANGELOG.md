@@ -2,6 +2,30 @@
 
 All notable changes to GBrain will be documented in this file.
 
+## [0.42.38.1] - 2026-06-10
+
+**gbrain-copilot: this distribution is now a self-sufficient fork of [garrytan/gbrain](https://github.com/garrytan/gbrain) with first-class GitHub Copilot CLI support.** Install, upgrade, releases, skills, and docs all come from `jaypetez/gbrain-copilot`; nothing requires the upstream repo. All credit for GBrain itself belongs upstream — this release is the integration layer.
+
+The headline is one-step Copilot CLI onboarding: `/plugin install jaypetez/gbrain-copilot` ships all 52 bundled skills, a `gbrain` custom agent that runs the brain-first protocol, and the gbrain MCP server entry from a single `plugin.json`. For everything else there's `gbrain connect --agent copilot` (paste-ready mcp-config.json block, or `--install` to merge it directly with a token smoke-test), installer scripts for Windows/macOS/Linux, and a full doc set (`COPILOT.md`, `docs/mcp/COPILOT_CLI.md`).
+
+### Added
+- **Copilot CLI plugin (`plugin.json`).** Bundles `skills/` (all 52), `.github/agents/gbrain.agent.md` (brain-first custom agent with an inline MCP server binding), and the local-stdio `gbrain serve` MCP entry. `/plugin install jaypetez/gbrain-copilot` is the one-step path.
+- **`gbrain connect --agent copilot` (+ `--install`).** Prints the mcp-config.json merge block (type http + Authorization bearer), or merges it directly into `~/.copilot/mcp-config.json` (honors `$COPILOT_HOME`), preserving existing servers, refusing same-name collisions without `--force`, refusing to rewrite unparseable JSON, and smoke-testing the token via `get_brain_identity`. `--json` gains `config_path` + `server_entry`.
+- **Installer scripts.** `scripts/install-copilot.ps1` (PowerShell 5.1-safe) and `scripts/install-copilot.sh`: Bun if missing → `bun install -g github:jaypetez/gbrain-copilot` → explicit migrations → `gbrain init --pglite` → mcp-config.json merge → `gbrain doctor`.
+- **Docs + skill.** `COPILOT.md` entry point, `docs/mcp/COPILOT_CLI.md` connection reference, `.github/copilot-instructions.md`, a Copilot platform dispatch in `INSTALL_FOR_AGENTS.md` Step 0 + new Step 5.5, and a `using-gbrain-with-copilot` skill (wiring, verification, permissions, failure-mode table).
+- **MCP stdio smoke test.** `scripts/smoke-mcp-stdio.ts` drives initialize → initialized → tools/list against `gbrain serve` — proves the exact transport Copilot CLI spawns, no client needed.
+
+### Changed
+- **Fork coordinates.** New `src/core/repo-coordinates.ts` is the single source of truth for this distribution's GitHub coordinates. Self-update (releases API), changelog fetch, issue/release hints, llms.txt generation, and install commands in docs now point at `jaypetez/gbrain-copilot` (`main` branch). Install-authenticity checks (bun-link detection, npm-squatter classification) accept BOTH the fork and upstream slugs. Intentionally kept on upstream coordinates: this CHANGELOG's history, `skills/migrations/` notes, `docs/designs/`, upstream issue citations (#218/#223/#1479), the pinned v0.11.1 fix-script URL, and the separate `gbrain-evals` / `gbrain-skillpack-registry` / `gbrain-schema-registry` repos.
+- **Skills are Agent-Skills compliant.** `skills/install/SKILL.md` gained the `name`/`description` frontmatter it was missing — required by Copilot CLI's skills loader. All 52 skills now pass the conformance, resolver, brain-first, and name/description audits.
+
+### Fixed
+- **Windows.** The POSIX inline postinstall (`command -v … 1>&2`) failed to parse under Bun's Windows shell and broke `bun install` entirely — replaced with cross-platform `scripts/postinstall.ts` (same behavior, never fails the install). Upgrade state/error files, the upgrade-errors doctor check, and feature-offer paths now use `process.env.HOME || homedir()` so they stop landing in relative paths when PowerShell leaves `HOME` unset.
+
+### To take advantage of v0.42.38.1
+
+Fresh install: run `scripts/install-copilot.ps1` (Windows) or `scripts/install-copilot.sh` (macOS/Linux), then `/plugin install jaypetez/gbrain-copilot` inside `copilot`. Existing brains: `gbrain upgrade`, then wire Copilot via `docs/mcp/COPILOT_CLI.md`.
+
 ## [0.42.38.0] - 2026-06-09
 
 **Three independent job-layer bugs that left autopilot wedged or swallowed a command's output are fixed, each traced to source.** A triage of the job/lock/teardown layer (gbrain#1972) pulled them into one wave.
