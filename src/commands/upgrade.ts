@@ -1,5 +1,6 @@
 import { execSync, execFileSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, realpathSync } from 'fs';
+import { homedir } from 'os';
 import { basename, join, dirname, resolve } from 'path';
 import { VERSION } from '../version.ts';
 import { ACCEPTED_REPO_SLUGS, GITHUB_URL, RELEASES_URL } from '../core/repo-coordinates.ts';
@@ -164,7 +165,9 @@ export function resolveBunGlobalRoot(): string {
     return join(bunInstall, 'install', 'global');
   }
 
-  const defaultRoot = join(process.env.HOME || '', '.bun', 'install', 'global');
+  // HOME first (tests mutate it for isolation), homedir() fallback (Windows
+  // PowerShell leaves HOME unset) — same pattern as core/preferences.ts.
+  const defaultRoot = join(process.env.HOME || homedir(), '.bun', 'install', 'global');
   if (isBunGlobalRoot(defaultRoot)) {
     return defaultRoot;
   }
@@ -224,7 +227,7 @@ export function recordUpgradeError(record: {
   hint: string;
 }): void {
   try {
-    const dir = join(process.env.HOME || '', '.gbrain');
+    const dir = join(process.env.HOME || homedir(), '.gbrain');
     mkdirSync(dir, { recursive: true });
     const path = join(dir, 'upgrade-errors.jsonl');
     const line = JSON.stringify({
@@ -244,7 +247,7 @@ export function recordUpgradeError(record: {
 
 function saveUpgradeState(oldVersion: string, newVersion: string) {
   try {
-    const dir = join(process.env.HOME || '', '.gbrain');
+    const dir = join(process.env.HOME || homedir(), '.gbrain');
     mkdirSync(dir, { recursive: true });
     const statePath = join(dir, 'upgrade-state.json');
     const state: Record<string, unknown> = existsSync(statePath)
@@ -357,7 +360,7 @@ export async function runPostUpgrade(args: string[] = []): Promise<void> {
   await applySelfUpgradeSetup();
   // Cosmetic: print feature pitches for migrations newer than the prior binary.
   try {
-    const statePath = join(process.env.HOME || '', '.gbrain', 'upgrade-state.json');
+    const statePath = join(process.env.HOME || homedir(), '.gbrain', 'upgrade-state.json');
     if (existsSync(statePath)) {
       const state = JSON.parse(readFileSync(statePath, 'utf-8'));
       const from = state?.last_upgrade?.from;

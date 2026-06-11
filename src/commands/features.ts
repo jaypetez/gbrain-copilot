@@ -6,6 +6,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { homedir } from 'os';
 import { join } from 'path';
 import type { BrainEngine } from '../core/engine.ts';
 import { VERSION } from '../version.ts';
@@ -52,7 +53,9 @@ const RECIPE_META = [
 // --- Persistence ---
 
 function offersPath(): string {
-  return join(process.env.HOME || '', '.gbrain', 'feature-offers.json');
+  // HOME first (tests mutate it), homedir() fallback (Windows PowerShell
+  // leaves HOME unset) — same pattern as core/preferences.ts.
+  return join(process.env.HOME || homedir(), '.gbrain', 'feature-offers.json');
 }
 
 function loadOffers(): FeatureOffersFile {
@@ -66,7 +69,7 @@ function loadOffers(): FeatureOffersFile {
 
 function saveOffers(offers: FeatureOffersFile) {
   try {
-    const dir = join(process.env.HOME || '', '.gbrain');
+    const dir = join(process.env.HOME || homedir(), '.gbrain');
     mkdirSync(dir, { recursive: true });
     writeFileSync(offersPath(), JSON.stringify(offers, null, 2));
   } catch { /* best-effort */ }

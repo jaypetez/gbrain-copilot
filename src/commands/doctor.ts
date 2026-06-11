@@ -1,5 +1,6 @@
 import type { BrainEngine } from '../core/engine.ts';
 import * as db from '../core/db.ts';
+import { homedir } from 'os';
 import { GITHUB_URL } from '../core/repo-coordinates.ts';
 import { LATEST_VERSION, getIdleBlockers } from '../core/migrate.ts';
 import { checkResolvable } from '../core/check-resolvable.ts';
@@ -4134,7 +4135,9 @@ export async function buildChecks(
   // with a paste-ready recovery hint. Without this, users end up with
   // half-upgraded brains and no signal.
   try {
-    const home = process.env.HOME || '';
+    // HOME first (tests mutate it), homedir() fallback (Windows PowerShell
+    // leaves HOME unset) — must mirror recordUpgradeError() in upgrade.ts.
+    const home = process.env.HOME || homedir();
     const errPath = join(home, '.gbrain', 'upgrade-errors.jsonl');
     if (existsSync(errPath)) {
       const lines = readFileSync(errPath, 'utf-8').split('\n').filter(l => l.trim());
