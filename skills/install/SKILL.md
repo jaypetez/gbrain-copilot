@@ -1,3 +1,12 @@
+---
+name: install
+version: 1.0.0
+description: |
+  Deprecated — replaced by the setup skill (skills/setup/SKILL.md). Kept as a
+  pointer so older references still resolve.
+brain_first: exempt
+---
+
 # Install GBrain (Deprecated)
 
 This skill has been replaced by the **setup** skill. See `skills/setup/SKILL.md`.
