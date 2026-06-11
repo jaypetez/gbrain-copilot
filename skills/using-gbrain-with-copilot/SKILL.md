@@ -30,6 +30,16 @@ Wire GitHub Copilot CLI (the agentic terminal tool, `npm i -g
 failure modes. The full reference is `docs/mcp/COPILOT_CLI.md`; this skill is
 the operational workflow.
 
+## Contract
+
+This skill guarantees:
+- Exactly ONE skills-delivery path is installed (plugin OR manual copy),
+  never both — duplicates are flagged and resolved.
+- The connection is verified end-to-end (`/mcp` status, `get_brain_identity`,
+  a real `search`) before declaring success.
+- Existing MCP servers in `mcp-config.json` are never clobbered.
+- Every failure mode ends with a paste-ready fix, not a shrug.
+
 ## Preflight
 
 1. `gbrain --version` — if it fails, the CLI is not installed. Run
@@ -80,6 +90,38 @@ Copilot CLI prompts per tool use. Pre-approve gbrain for a session with
 | Remote: 401 on every call | token wrong/expired — re-run `gbrain connect ... --agent copilot --install` with a fresh token |
 | Slow first response on PGLite | cold WASM start; subsequent calls are fast. Stop `gbrain serve` before large `gbrain sync` runs (single-writer) |
 | Duplicate skills listed | plugin + manual copy both installed — remove one (`/plugin uninstall gbrain` or delete from `~/.copilot/skills/`) |
+
+## Anti-Patterns
+
+- **Installing both skills paths.** `/plugin install` AND copying to
+  `~/.copilot/skills/` produces duplicate skill names. Pick one.
+- **Hand-editing mcp-config.json into invalid JSON.** Use `/mcp add`,
+  `gbrain connect --agent copilot --install`, or the installer scripts —
+  all three merge safely and refuse to clobber.
+- **`--allow-all-tools` to silence permission prompts.** Scope it:
+  `copilot --allow-tool 'gbrain'`.
+- **Declaring success without a live search.** `/mcp` showing "running"
+  proves the process spawned, not that the brain answers — always run a
+  real query against known content.
+- **Putting the bearer token anywhere except the Authorization header in
+  mcp-config.json.** It is a long-lived full-access secret; never echo it
+  into chat output or shell history.
+
+## Output Format
+
+After wiring, report to the user:
+
+```
+GBrain ↔ Copilot CLI: CONNECTED
+  Transport:  local stdio (gbrain serve)   [or: remote http <url>]
+  Skills:     via plugin jaypetez/gbrain-copilot   [or: ~/.copilot/skills/ | none]
+  Agent:      gbrain (/agent to select)
+  Verified:   get_brain_identity ✓ · list_skills ✓ (52) · search ✓
+  Next:       ask "search my brain for <topic>"
+```
+
+On failure, report the failing step, the symptom row from Troubleshooting
+that matches, and the paste-ready fix command.
 
 ## After wiring
 
