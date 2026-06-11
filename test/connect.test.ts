@@ -7,6 +7,9 @@ import {
   isValidName,
   buildClaudeMcpAddArgv,
   buildCodexMcpAddArgv,
+  buildCopilotServerEntry,
+  mergeCopilotMcpConfig,
+  resolveCopilotConfigPath,
   cmdString,
   redactToken,
   buildConnectBlock,
@@ -22,6 +25,8 @@ import {
   REDACTED,
   LEARN_INSTRUCTION,
 } from '../src/commands/connect.ts';
+import { homedir } from 'os';
+import { join } from 'path';
 import {
   classifyProbeError,
   extractResultText,
@@ -614,7 +619,7 @@ describe('runConnect --install', () => {
       installDeps(),
     );
     expect(r.exitCode).toBe(1);
-    expect(r.err.join('\n')).toMatch(/--install supports claude-code and codex/);
+    expect(r.err.join('\n')).toMatch(/--install supports claude-code, codex, and copilot/);
   });
 
   test('--install with --agent perplexity is rejected (GUI connector)', async () => {
@@ -747,8 +752,8 @@ describe('runConnect print mode', () => {
 });
 
 describe('AGENT_IDS', () => {
-  test('exposes the four supported agents', () => {
-    expect(AGENT_IDS).toEqual(['claude-code', 'codex', 'perplexity', 'generic']);
+  test('exposes the five supported agents', () => {
+    expect(AGENT_IDS).toEqual(['claude-code', 'codex', 'copilot', 'perplexity', 'generic']);
   });
 });
 
@@ -857,5 +862,251 @@ describe('runConnect --oauth', () => {
     );
     expect(r.exitCode).toBe(1);
     expect(r.err.join('\n')).toMatch(/--install is not supported with --oauth/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GitHub Copilot CLI target (fork addition) — pure helpers + config-file install
+// ---------------------------------------------------------------------------
+
+describe('resolveCopilotConfigPath', () => {
+  test('defaults to ~/.copilot/mcp-config.json', () => {
+    expect(resolveCopilotConfigPath(() => undefined)).toBe(join(homedir(), '.copilot', 'mcp-config.json'));
+  });
+  test('honors COPILOT_HOME', () => {
+    const env = (n: string) => (n === 'COPILOT_HOME' ? join('X:', 'copilot-home') : undefined);
+    expect(resolveCopilotConfigPath(env)).toBe(join('X:', 'copilot-home', 'mcp-config.json'));
+  });
+  test('blank COPILOT_HOME falls back to the default', () => {
+    const env = (n: string) => (n === 'COPILOT_HOME' ? '  ' : undefined);
+    expect(resolveCopilotConfigPath(env)).toBe(join(homedir(), '.copilot', 'mcp-config.json'));
+  });
+});
+
+describe('buildCopilotServerEntry', () => {
+  test('http entry with bearer header and tools wildcard', () => {
+    expect(buildCopilotServerEntry({ url: 'https://h/mcp', token: 'gbrain_tok' })).toEqual({
+      type: 'http',
+      url: 'https://h/mcp',
+      headers: { Authorization: 'Bearer gbrain_tok' },
+      tools: ['*'],
+    });
+  });
+  test('null token uses the placeholder', () => {
+    const e = buildCopilotServerEntry({ url: 'https://h/mcp', token: null }) as { headers: { Authorization: string } };
+    expect(e.headers.Authorization).toBe(`Bearer ${PLACEHOLDER_TOKEN}`);
+  });
+});
+
+describe('mergeCopilotMcpConfig', () => {
+  const entry = buildCopilotServerEntry({ url: 'https://h/mcp', token: 'tok' });
+
+  test('missing file (null) creates a fresh config', () => {
+    const r = mergeCopilotMcpConfig(null, 'gbrain', entry, false);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.replaced).toBe(false);
+      expect(JSON.parse(r.json)).toEqual({ mcpServers: { gbrain: entry } });
+      expect(r.json.endsWith('\n')).toBe(true);
+    }
+  });
+
+  test('empty/whitespace file is treated as fresh', () => {
+    const r = mergeCopilotMcpConfig('  \n', 'gbrain', entry, false);
+    expect(r.ok).toBe(true);
+  });
+
+  test('existing servers are preserved', () => {
+    const existing = JSON.stringify({ mcpServers: { other: { type: 'local', command: 'other-tool' } }, theme: 'dark' });
+    const r = mergeCopilotMcpConfig(existing, 'gbrain', entry, false);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const parsed = JSON.parse(r.json);
+      expect(parsed.mcpServers.other).toEqual({ type: 'local', command: 'other-tool' });
+      expect(parsed.mcpServers.gbrain).toEqual(entry);
+      expect(parsed.theme).toBe('dark'); // unrelated top-level keys survive
+    }
+  });
+
+  test('name collision without force is refused', () => {
+    const existing = JSON.stringify({ mcpServers: { gbrain: { type: 'local', command: 'gbrain', args: ['serve'] } } });
+    const r = mergeCopilotMcpConfig(existing, 'gbrain', entry, false);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/already exists/);
+  });
+
+  test('name collision with force replaces the entry', () => {
+    const existing = JSON.stringify({ mcpServers: { gbrain: { type: 'local', command: 'gbrain', args: ['serve'] } } });
+    const r = mergeCopilotMcpConfig(existing, 'gbrain', entry, true);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.replaced).toBe(true);
+      expect(JSON.parse(r.json).mcpServers.gbrain).toEqual(entry);
+    }
+  });
+
+  test('malformed JSON is refused, never clobbered', () => {
+    const r = mergeCopilotMcpConfig('{ not json', 'gbrain', entry, false);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/not valid JSON/);
+  });
+
+  test('non-object root and non-object mcpServers are refused', () => {
+    expect(mergeCopilotMcpConfig('[1,2]', 'gbrain', entry, false).ok).toBe(false);
+    expect(mergeCopilotMcpConfig('{"mcpServers": []}', 'gbrain', entry, false).ok).toBe(false);
+  });
+});
+
+describe('copilot print mode + JSON', () => {
+  test('--agent copilot prints the mcp-config.json merge block', async () => {
+    const r = await runWithExitCapture(
+      ['https://brain.example.com/mcp', '--token', 'gbrain_tok', '--agent', 'copilot'],
+      installDeps(),
+    );
+    expect(r.exitCode).toBeUndefined();
+    const out = r.out.join('\n');
+    expect(out).toContain('mcp-config.json');
+    expect(out).toContain('"Authorization": "Bearer gbrain_tok"');
+    expect(out).toContain('"type": "http"');
+    expect(out).toContain('/mcp add');
+    expect(out).toContain(LEARN_INSTRUCTION);
+  });
+
+  test('--agent copilot without a token prints the placeholder + auth-create hint', async () => {
+    const r = await runWithExitCapture(
+      ['https://brain.example.com/mcp', '--agent', 'copilot'],
+      installDeps(),
+    );
+    expect(r.exitCode).toBeUndefined();
+    const out = r.out.join('\n');
+    expect(out).toContain(PLACEHOLDER_TOKEN);
+    expect(out).toMatch(/gbrain auth create "copilot"/);
+  });
+
+  test('--agent copilot --json includes config_path and a redacted server_entry', async () => {
+    const r = await runWithExitCapture(
+      ['https://brain.example.com/mcp', '--token', 'gbrain_secret', '--agent', 'copilot', '--json'],
+      installDeps(),
+    );
+    const j = JSON.parse(r.out.join('\n'));
+    expect(j.agent).toBe('copilot');
+    expect(j.command).toBeNull();
+    expect(String(j.config_path)).toContain('mcp-config.json');
+    expect(j.server_entry.type).toBe('http');
+    expect(j.server_entry.headers.Authorization).toBe(`Bearer ${REDACTED}`);
+    expect(r.out.join('\n')).not.toContain('gbrain_secret');
+  });
+});
+
+describe('runConnect --install --agent copilot (config-file write)', () => {
+  function copilotDeps(over: Partial<ConnectDeps> = {}, files: Record<string, string> = {}) {
+    const writes: Array<{ path: string; content: string }> = [];
+    const deps = installDeps({
+      env: (n) => (n === 'COPILOT_HOME' ? join('X:', 'copilot-test') : undefined),
+      hasBinary: () => false, // no copilot binary needed — config-file install
+      readTextFile: (path) => files[path] ?? null,
+      writeTextFile: (path, content) => { writes.push({ path, content }); },
+      ...over,
+    });
+    return { deps, writes };
+  }
+  const configPath = join('X:', 'copilot-test', 'mcp-config.json');
+
+  test('happy path: writes mcp-config.json, verifies, prints learn instruction', async () => {
+    const { deps, writes } = copilotDeps();
+    const r = await runWithExitCapture(
+      ['https://brain.example.com/mcp', '--token', 'gbrain_tok', '--agent', 'copilot', '--install', '--yes'],
+      deps,
+    );
+    expect(r.exitCode).toBeUndefined();
+    expect(writes.length).toBe(1);
+    expect(writes[0].path).toBe(configPath);
+    const written = JSON.parse(writes[0].content);
+    expect(written.mcpServers.gbrain).toEqual(buildCopilotServerEntry({ url: 'https://brain.example.com/mcp', token: 'gbrain_tok' }));
+    expect(r.err.join('\n')).toMatch(/Added MCP server 'gbrain'/);
+    expect(r.err.join('\n')).toContain(LEARN_INSTRUCTION);
+  });
+
+  test('existing other servers are preserved on install', async () => {
+    const existing = JSON.stringify({ mcpServers: { other: { type: 'local', command: 'x' } } });
+    const { deps, writes } = copilotDeps({}, { [configPath]: existing });
+    const r = await runWithExitCapture(
+      ['https://brain.example.com/mcp', '--token', 'tok', '--agent', 'copilot', '--install', '--yes'],
+      deps,
+    );
+    expect(r.exitCode).toBeUndefined();
+    const written = JSON.parse(writes[0].content);
+    expect(written.mcpServers.other).toEqual({ type: 'local', command: 'x' });
+    expect(written.mcpServers.gbrain).toBeDefined();
+  });
+
+  test('name collision without --force exits 1 and writes nothing', async () => {
+    const existing = JSON.stringify({ mcpServers: { gbrain: { type: 'local', command: 'gbrain', args: ['serve'] } } });
+    const { deps, writes } = copilotDeps({}, { [configPath]: existing });
+    const r = await runWithExitCapture(
+      ['https://brain.example.com/mcp', '--token', 'tok', '--agent', 'copilot', '--install', '--yes'],
+      deps,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(writes.length).toBe(0);
+    expect(r.err.join('\n')).toMatch(/already exists/);
+  });
+
+  test('--force replaces the existing entry', async () => {
+    const existing = JSON.stringify({ mcpServers: { gbrain: { type: 'local', command: 'gbrain', args: ['serve'] } } });
+    const { deps, writes } = copilotDeps({}, { [configPath]: existing });
+    const r = await runWithExitCapture(
+      ['https://brain.example.com/mcp', '--token', 'tok', '--agent', 'copilot', '--install', '--yes', '--force'],
+      deps,
+    );
+    expect(r.exitCode).toBeUndefined();
+    expect(JSON.parse(writes[0].content).mcpServers.gbrain.type).toBe('http');
+    expect(r.err.join('\n')).toMatch(/Replaced MCP server 'gbrain'/);
+  });
+
+  test('malformed existing config exits 1 and writes nothing', async () => {
+    const { deps, writes } = copilotDeps({}, { [configPath]: '{ not json' });
+    const r = await runWithExitCapture(
+      ['https://brain.example.com/mcp', '--token', 'tok', '--agent', 'copilot', '--install', '--yes'],
+      deps,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(writes.length).toBe(0);
+    expect(r.err.join('\n')).toMatch(/not valid JSON/);
+  });
+
+  test('probe failure warns + exits 1 + never echoes the token', async () => {
+    const { deps } = copilotDeps({ probe: async () => ({ ok: false, reason: 'auth', message: 'HTTP 401 for gbrain_secret' }) });
+    const r = await runWithExitCapture(
+      ['https://brain.example.com/mcp', '--token', 'gbrain_secret', '--agent', 'copilot', '--install', '--yes'],
+      deps,
+    );
+    expect(r.exitCode).toBe(1);
+    const all = [...r.out, ...r.err].join('\n');
+    expect(all).toMatch(/did not verify \(auth\)/);
+    expect(all).not.toContain('gbrain_secret');
+    expect(all).toContain(REDACTED);
+  });
+
+  test('TTY prompt decline aborts without writing', async () => {
+    const { deps, writes } = copilotDeps({ isTTY: () => true, promptYesNo: async () => false });
+    const r = await runWithExitCapture(
+      ['https://brain.example.com/mcp', '--token', 'tok', '--agent', 'copilot', '--install'],
+      deps,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.err.join('\n')).toMatch(/Aborted/);
+    expect(writes.length).toBe(0);
+  });
+
+  test('non-interactive without --yes is refused', async () => {
+    const { deps, writes } = copilotDeps(); // isTTY false from installDeps
+    const r = await runWithExitCapture(
+      ['https://brain.example.com/mcp', '--token', 'tok', '--agent', 'copilot', '--install'],
+      deps,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.err.join('\n')).toMatch(/requires --yes/);
+    expect(writes.length).toBe(0);
   });
 });

@@ -9,7 +9,7 @@
  * needed for the connection.
  *
  *   gbrain connect <mcp-url> [--token <bearer>] [--name gbrain]
- *                  [--agent claude-code|codex|perplexity|generic]
+ *                  [--agent claude-code|codex|copilot|perplexity|generic]
  *                  [--oauth [--register | --client-id ID --client-secret SECRET] [--scopes "read write"]]
  *                  [--install] [--yes] [--json] [--show-token] [--force]
  *                  [--timeout-ms N]
@@ -27,12 +27,18 @@
  *     only; --install runs it).
  *   - codex: `codex mcp add <name> --url <url> --bearer-token-env-var
  *     GBRAIN_REMOTE_TOKEN` (bearer via env var; --install runs it).
+ *   - copilot: GitHub Copilot CLI. Bearer via an `Authorization` header in
+ *     `~/.copilot/mcp-config.json` (honors $COPILOT_HOME); --install merges
+ *     the server entry into that file directly (no CLI binary required).
  *   - perplexity: GUI connector (Settings → Connectors). Supports bearer or
  *     OAuth; no --install.
  *   - generic: prints the connector fields for any other MCP client.
  */
 
 import { execFileSync } from 'child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { homedir } from 'os';
+import { dirname, join } from 'path';
 import type { ConnectProbeResult } from '../core/connect-probe.ts';
 import { probeBrainIdentity, DEFAULT_PROBE_TIMEOUT_MS } from '../core/connect-probe.ts';
 import { promptLine } from '../core/cli-util.ts';
@@ -47,7 +53,7 @@ const NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
 // Single source of truth shared with the probe (was a duplicated 15_000 literal).
 const DEFAULT_TIMEOUT_MS = DEFAULT_PROBE_TIMEOUT_MS;
 
-export type AgentId = 'claude-code' | 'codex' | 'perplexity' | 'generic';
+export type AgentId = 'claude-code' | 'codex' | 'copilot' | 'perplexity' | 'generic';
 
 interface AgentSpec {
   id: AgentId;
@@ -55,16 +61,20 @@ interface AgentSpec {
   binary?: string;     // CLI binary backing --install ('claude' | 'codex')
   installable: boolean;
   supportsOAuth: boolean; // accepts OAuth client-credentials connector fields
+  /** How --install applies config: shell out to the agent's CLI binary, or
+   * write the agent's MCP config file directly (GitHub Copilot CLI). */
+  installKind?: 'binary' | 'copilot-config';
 }
 
 export const AGENT_SPECS: Record<AgentId, AgentSpec> = {
-  'claude-code': { id: 'claude-code', label: 'Claude Code', binary: 'claude', installable: true, supportsOAuth: false },
-  codex: { id: 'codex', label: 'Codex', binary: 'codex', installable: true, supportsOAuth: false },
+  'claude-code': { id: 'claude-code', label: 'Claude Code', binary: 'claude', installable: true, supportsOAuth: false, installKind: 'binary' },
+  codex: { id: 'codex', label: 'Codex', binary: 'codex', installable: true, supportsOAuth: false, installKind: 'binary' },
+  copilot: { id: 'copilot', label: 'GitHub Copilot CLI', installable: true, supportsOAuth: false, installKind: 'copilot-config' },
   perplexity: { id: 'perplexity', label: 'Perplexity Computer', installable: false, supportsOAuth: true },
   generic: { id: 'generic', label: 'your agent', installable: false, supportsOAuth: true },
 };
 
-export const AGENT_IDS: AgentId[] = ['claude-code', 'codex', 'perplexity', 'generic'];
+export const AGENT_IDS: AgentId[] = ['claude-code', 'codex', 'copilot', 'perplexity', 'generic'];
 
 // The named tools MUST be real MCP-exposed ops (verified by the round-trip
 // E2E). `capture` is intentionally absent: it's a CLI-only convenience wrapper,
@@ -95,7 +105,7 @@ Usage:
   gbrain connect <mcp-url> [--token <bearer>] [flags]
 
 Prints a copy-paste setup block for your agent, or wires it up directly with
---install (claude-code + codex only). The MCP URL is your remote
+--install (claude-code, codex, copilot). The MCP URL is your remote
 'gbrain serve --http' endpoint; a bare host is rejected — pass an explicit
 https:// URL.
 
@@ -108,14 +118,15 @@ Auth:
 Flags:
   --token <bearer>     Bearer token (else $${ENV_VAR}; from 'gbrain auth create')
   --name <id>          MCP server name in the agent (default: ${DEFAULT_NAME})
-  --agent <kind>       claude-code (default) | codex | perplexity | generic
+  --agent <kind>       claude-code (default) | codex | copilot | perplexity | generic
   --oauth              Use OAuth client credentials instead of a bearer token
   --register           With --oauth: mint a client on the host (gbrain auth register-client)
   --client-id <id>     With --oauth: use an existing OAuth client id
   --client-secret <s>  With --oauth: use an existing OAuth client secret
   --scopes "<s>"       With --oauth --register: client scopes (default: "${DEFAULT_SCOPES}")
-  --install            Run the agent's MCP-add command, then smoke-test the token
-                       (claude-code + codex only)
+  --install            Apply the MCP config (claude-code/codex: run the agent's
+                       mcp-add command; copilot: merge into mcp-config.json),
+                       then smoke-test the token
   --yes                Skip the install confirmation prompt
   --force              On --install, replace an existing server of the same name
   --json               Emit machine-readable JSON (secret redacted)
@@ -126,6 +137,7 @@ Examples:
   gbrain connect https://brain.example.com/mcp --token gbrain_xxx
   gbrain connect https://brain.example.com:3131 --install --yes
   gbrain connect https://brain.example.com/mcp --token gbrain_xxx --agent codex
+  gbrain connect https://brain.example.com/mcp --token gbrain_xxx --agent copilot --install
   gbrain connect https://brain.example.com/mcp --agent perplexity --oauth --register
   gbrain connect https://brain.example.com/mcp --agent perplexity --oauth \\
     --client-id gbrain_cl_xxx --client-secret gbrain_cs_xxx
@@ -266,6 +278,66 @@ export function buildCodexMcpAddArgv(p: { name: string; url: string; envVar: str
   return ['mcp', 'add', p.name, '--url', p.url, '--bearer-token-env-var', p.envVar];
 }
 
+/** Copilot CLI MCP config path: $COPILOT_HOME/mcp-config.json, else ~/.copilot/mcp-config.json. */
+export function resolveCopilotConfigPath(env: (name: string) => string | undefined): string {
+  const override = env('COPILOT_HOME');
+  const base = override && override.trim() !== '' ? override : join(homedir(), '.copilot');
+  return join(base, 'mcp-config.json');
+}
+
+/** The server entry merged under mcpServers.<name> in Copilot's mcp-config.json. */
+export function buildCopilotServerEntry(p: { url: string; token: string | null }): Record<string, unknown> {
+  return {
+    type: 'http',
+    url: p.url,
+    headers: { Authorization: `Bearer ${p.token ?? PLACEHOLDER_TOKEN}` },
+    tools: ['*'],
+  };
+}
+
+export type CopilotMergeResult =
+  | { ok: true; json: string; replaced: boolean }
+  | { ok: false; error: string };
+
+/**
+ * Merge a server entry into an existing mcp-config.json (or a missing/empty
+ * one). Refuses an existing server of the same name without `force`, and
+ * refuses to rewrite a file it cannot parse — silently clobbering the user's
+ * other MCP servers would be far worse than asking them to fix the JSON.
+ */
+export function mergeCopilotMcpConfig(
+  existingJson: string | null,
+  name: string,
+  entry: Record<string, unknown>,
+  force: boolean,
+): CopilotMergeResult {
+  let root: Record<string, unknown> = {};
+  if (existingJson != null && existingJson.trim() !== '') {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(existingJson);
+    } catch {
+      return { ok: false, error: 'Existing mcp-config.json is not valid JSON — fix or remove it, then re-run.' };
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { ok: false, error: 'Existing mcp-config.json must be a JSON object.' };
+    }
+    root = parsed as Record<string, unknown>;
+  }
+  const servers = root.mcpServers ?? {};
+  if (servers === null || typeof servers !== 'object' || Array.isArray(servers)) {
+    return { ok: false, error: "Existing mcp-config.json 'mcpServers' must be an object." };
+  }
+  const map = servers as Record<string, unknown>;
+  const replaced = Object.prototype.hasOwnProperty.call(map, name);
+  if (replaced && !force) {
+    return { ok: false, error: `An MCP server named '${name}' already exists in mcp-config.json. Pass --name <other>, or --force to replace it.` };
+  }
+  map[name] = entry;
+  root.mcpServers = map;
+  return { ok: true, json: JSON.stringify(root, null, 2) + '\n', replaced };
+}
+
 /**
  * POSIX single-quote any arg that isn't already shell-safe, so `$()`, backticks,
  * etc. in a token are inert literals when the block is pasted into a shell
@@ -324,6 +396,31 @@ function codexBlock(p: { name: string; url: string; token: string | null }): str
     LEARN_INSTRUCTION,
     '',
     SECRET_NOTE,
+  );
+  return lines.join('\n');
+}
+
+function copilotBlock(p: { name: string; url: string; token: string | null; configPath?: string }): string {
+  const configPath = p.configPath ?? '~/.copilot/mcp-config.json';
+  const snippet = JSON.stringify(
+    { mcpServers: { [p.name]: buildCopilotServerEntry({ url: p.url, token: p.token }) } },
+    null,
+    2,
+  );
+  const lines = [
+    `# Merge into ${configPath} (GitHub Copilot CLI MCP config; honors $COPILOT_HOME):`,
+    '',
+    snippet,
+    '',
+    '# Or interactively: run `copilot`, then `/mcp add` (type: http, same URL + Authorization header).',
+    '',
+  ];
+  if (!p.token) lines.push(`Replace ${PLACEHOLDER_TOKEN} with a token from \`gbrain auth create "copilot"\` on the host.`, '');
+  lines.push(
+    LEARN_INSTRUCTION,
+    '',
+    SECRET_NOTE,
+    'It lands in plaintext in mcp-config.json — keep that file private.',
   );
   return lines.join('\n');
 }
@@ -391,7 +488,7 @@ function genericOAuthBlock(p: { oauth: OAuthCreds }): string {
   ].join('\n');
 }
 
-export function buildConnectBlock(p: { agent: AgentId; name: string; url: string; token: string | null; oauth?: OAuthCreds }): string {
+export function buildConnectBlock(p: { agent: AgentId; name: string; url: string; token: string | null; oauth?: OAuthCreds; copilotConfigPath?: string }): string {
   if (p.oauth) {
     // OAuth is only emitted for connector-style agents (gated upstream).
     return p.agent === 'generic' ? genericOAuthBlock({ oauth: p.oauth }) : perplexityOAuthBlock({ oauth: p.oauth });
@@ -399,12 +496,13 @@ export function buildConnectBlock(p: { agent: AgentId; name: string; url: string
   switch (p.agent) {
     case 'claude-code': return claudeBlock(p);
     case 'codex': return codexBlock(p);
+    case 'copilot': return copilotBlock({ ...p, configPath: p.copilotConfigPath });
     case 'perplexity': return perplexityBearerBlock(p);
     case 'generic': return genericBearerBlock(p);
   }
 }
 
-export function buildJson(p: { url: string; name: string; agent: AgentId; token: string | null; showToken: boolean; oauth?: OAuthCreds; scopes?: string }): Record<string, unknown> {
+export function buildJson(p: { url: string; name: string; agent: AgentId; token: string | null; showToken: boolean; oauth?: OAuthCreds; scopes?: string; copilotConfigPath?: string }): Record<string, unknown> {
   if (p.oauth) {
     const secret = p.oauth.clientSecret;
     return {
@@ -434,7 +532,7 @@ export function buildJson(p: { url: string; name: string; agent: AgentId; token:
     command_argv = buildCodexMcpAddArgv({ name: p.name, url: p.url, envVar: ENV_VAR });
     command = cmdString('codex', command_argv);
   }
-  return {
+  const base: Record<string, unknown> = {
     schema_version: 1,
     agent: p.agent,
     mcp_url: p.url,
@@ -444,10 +542,17 @@ export function buildJson(p: { url: string; name: string; agent: AgentId; token:
     token_present: p.token != null,
     token_redacted: p.token != null && !p.showToken,
     header: `Authorization: Bearer ${shownToken}`,
-    command, // runnable CLI command; null for perplexity/generic (UI/manual setup)
+    command, // runnable CLI command; null for copilot/perplexity/generic (config-file/UI setup)
     command_argv,
     learn_instruction: LEARN_INSTRUCTION,
   };
+  if (p.agent === 'copilot') {
+    // Config-file install target instead of a runnable command. The entry
+    // carries the same redaction policy as `header` above.
+    base.config_path = p.copilotConfigPath ?? null;
+    base.server_entry = buildCopilotServerEntry({ url: p.url, token: p.token ? shownToken : null });
+  }
+  return base;
 }
 
 // ---------------------------------------------------------------------------
@@ -466,6 +571,10 @@ export interface ConnectDeps {
   probe(url: string, token: string, timeoutMs: number): Promise<ConnectProbeResult>;
   env(name: string): string | undefined;
   registerOAuthClient(name: string, scopes: string): RegisterResult;
+  /** Read a text file; null when it does not exist. Injectable for tests (copilot --install). */
+  readTextFile?(path: string): string | null;
+  /** Create parent dirs and write a text file. Injectable for tests (copilot --install). */
+  writeTextFile?(path: string, content: string): void;
 }
 
 async function defaultPromptYesNo(question: string): Promise<boolean> {
@@ -523,6 +632,17 @@ const defaultDeps: ConnectDeps = {
   probe: (url, token, timeoutMs) => probeBrainIdentity(url, token, { timeoutMs }),
   env: (name) => process.env[name],
   registerOAuthClient: defaultRegisterOAuthClient,
+  readTextFile: (path) => {
+    try {
+      return readFileSync(path, 'utf-8');
+    } catch {
+      return null;
+    }
+  },
+  writeTextFile: (path, content) => {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content, 'utf-8');
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -686,11 +806,13 @@ export async function runConnect(args: string[], deps: ConnectDeps = defaultDeps
   if (tok.kind === 'error') fail(tok.error);
   const token: string | null = tok.kind === 'literal' ? tok.token : null;
 
+  const copilotConfigPath = f.agent === 'copilot' ? resolveCopilotConfigPath((n) => deps.env(n)) : undefined;
+
   if (!f.install) {
     if (f.json) {
-      console.log(JSON.stringify(buildJson({ url, name: f.name, agent: f.agent, token, showToken: f.showToken }), null, 2));
+      console.log(JSON.stringify(buildJson({ url, name: f.name, agent: f.agent, token, showToken: f.showToken, copilotConfigPath }), null, 2));
     } else {
-      console.log(buildConnectBlock({ agent: f.agent, name: f.name, url, token }));
+      console.log(buildConnectBlock({ agent: f.agent, name: f.name, url, token, copilotConfigPath }));
     }
     return;
   }
@@ -698,8 +820,52 @@ export async function runConnect(args: string[], deps: ConnectDeps = defaultDeps
   // --install path. token is guaranteed literal here (install mode resolveToken).
   const realToken = token as string;
   if (!spec.installable) {
-    fail(`--install supports claude-code and codex. ${spec.label} is set up through its own UI — drop --install to print the setup steps.`);
+    fail(`--install supports claude-code, codex, and copilot. ${spec.label} is set up through its own UI — drop --install to print the setup steps.`);
   }
+
+  // Copilot CLI install is config-file based: merge the server entry into
+  // mcp-config.json directly. No agent binary needs to be on PATH.
+  if (spec.installKind === 'copilot-config') {
+    const configPath = copilotConfigPath as string;
+    const readTextFile = deps.readTextFile ?? (() => null);
+    const writeTextFile = deps.writeTextFile ?? (() => { throw new Error('writeTextFile dep missing'); });
+
+    if (!f.yes) {
+      if (!deps.isTTY()) {
+        fail('--install in a non-interactive shell requires --yes (refusing to register a credential-bearing MCP server without confirmation).');
+      }
+      const ok = await deps.promptYesNo(`Add MCP server '${f.name}' -> ${url} to ${spec.label} (${configPath})?`);
+      if (!ok) fail('Aborted.');
+    }
+
+    const merged = mergeCopilotMcpConfig(
+      readTextFile(configPath),
+      f.name,
+      buildCopilotServerEntry({ url, token: realToken }),
+      f.force,
+    );
+    if (!merged.ok) fail(merged.error);
+    try {
+      writeTextFile(configPath, merged.json);
+    } catch (e) {
+      fail(`Could not write ${configPath}: ${redactToken(e instanceof Error ? e.message : String(e), realToken)}`);
+    }
+    console.error(`${merged.replaced ? 'Replaced' : 'Added'} MCP server '${f.name}' -> ${url} in ${configPath}.`);
+
+    const copilotProbe = await deps.probe(url, realToken, f.timeoutMs);
+    if (copilotProbe.ok) {
+      console.error(`Verified: ${copilotProbe.identity || 'brain reachable'}`);
+      console.error('');
+      console.error(LEARN_INSTRUCTION);
+      return;
+    }
+    console.error(
+      `Warning: registered '${f.name}', but the smoke-test did not verify (${copilotProbe.reason}): ${redactToken(copilotProbe.message, realToken)}`,
+    );
+    console.error('The agent will likely hit 401/errors until the token or URL is fixed.');
+    process.exit(1);
+  }
+
   const binary = spec.binary as string; // 'claude' | 'codex'
   if (!deps.hasBinary(binary)) {
     fail(`${spec.label} CLI ('${binary}') not found on PATH. Install ${spec.label}, or drop --install to print the command to run manually.`);
