@@ -2,6 +2,58 @@
 
 All notable changes to GBrain will be documented in this file.
 
+## [0.42.39.0] - 2026-06-11
+
+**The first outside install audit filed 10 issues against this fork. This release fixes all of them: the Copilot plugin installs from a marketplace at about 1 MB instead of copying the whole 87 MB dev repo, `gbrain doctor` scores a fresh brain 100 instead of 70, unattended installs actually work without API keys, and the MCP identity tool stops erroring on every default setup.**
+
+A first-time user installed this fork on Windows, stress-tested everything from the install script to the MCP server, and filed ten detailed issues (#1 through #10). Thank you @aviraldua93, this was real work and every finding was reproducible. The fixes land in one wave.
+
+The headline numbers:
+
+| What | Before | After |
+|---|---|---|
+| Copilot plugin install | 87.73 MB, 2,513 files, whole dev repo | ~1.0 MB, 131 files, skills + agent only |
+| Contributor docs auto-loading into Copilot sessions | ~50 KB every session | none (they no longer ship in the plugin) |
+| Fresh-brain `gbrain doctor` | score 70, ~67 lines of noise, 7 internal breadcrumbs | score 100, 3 progress lines, clean report |
+| `whoami` over MCP | always returned `unknown_transport` | returns your OS identity |
+| `install-copilot -Yes` with no API keys | green banner, broken install, exit 0 | working keyword-search brain, or an honest PARTIAL INSTALL with exit 1 |
+| Failed commands on PGLite | exited 0 (a runtime quirk ate the exit code) | exit 1 |
+
+**New install flow.** The plugin now installs from a marketplace, which is the path GitHub Copilot CLI supports going forward (direct repo installs print a deprecation warning):
+
+```
+copilot plugin marketplace add jaypetez/gbrain-copilot
+copilot plugin install gbrain@gbrain-copilot
+```
+
+Existing plugin users: reinstall via the two commands above to drop from 87 MB to 1 MB and stop the contributor instructions from loading into your sessions.
+
+**Things to watch after upgrading:**
+
+- `gbrain doctor` now exits 0 = healthy, 1 = warnings, 2 = failures. Scripts that chained `gbrain doctor && next-step` will now stop on warnings, which is the point, but check your automation.
+- Commands that fail on a PGLite brain now exit 1. They always should have; a PGLite runtime quirk was resetting the exit code to 0 after the error printed.
+- Bulk commands (doctor, sync, embed, import...) now print at most one progress heartbeat line per second in non-TTY mode instead of one per item. `--progress-json` still emits every event.
+
+### Added
+- **Marketplace manifest + thin plugin payload.** `.github/plugin/marketplace.json` points Copilot CLI at a generated `plugins/gbrain/` directory (skills, the gbrain agent, plugin manifest, nothing else). `scripts/build-copilot-plugin.sh` regenerates it; a new `check:fork-hygiene` gate in `bun run verify` fails the build if the payload drifts from `skills/`, if any manifest version drifts from `VERSION`, or if a stale upstream URL sneaks into published docs. (#2, #3, #8, #9)
+- **`whoami` works over local MCP.** The stdio transport now tags requests so `whoami` can answer with your OS user, source, and takes visibility. The security posture is unchanged: stdio callers stay on the untrusted-remote path for filesystem confinement, and the `unknown_transport` error still fires for genuinely misconfigured remote transports. (#4)
+- **Windows parent-death watchdog.** `gbrain serve` on Windows now detects a dead parent process directly (no `ps`, no extra processes) and shuts down cleanly, and the startup message about it is one calm line instead of a warning that reads like degraded mode. (#6)
+- **`gbrain help` works.** `gbrain help` prints usage like every other CLI, and `gbrain help <command>` routes to that command's help. Top-level `--help` now lists `onboard`, `skillpack`, and `repair-jsonb`, which existed but were invisible. (#10)
+
+### Fixed
+- **`gbrain doctor` tells the truth on PGLite.** The pgvector and JSONB integrity checks now actually run on PGLite brains (they probed a Postgres-only connection before and always failed into a warning). Checks that warn on a pristine empty brain were demoted to ok-with-hint, so a just-initialized brain scores 100. The seven `[doctor-categories] unknown check name` developer breadcrumbs are gone, and the category drift guard now scans every module that emits checks. (#5)
+- **Unattended installs.** `install-copilot.ps1 -Yes` / `install-copilot.sh --yes` no longer stall on a hidden interactive prompt, fall back to a keyword-search-only brain (with a clear warning and the one-liner to enable embeddings later) when no embedding API key is present, explain the migrations step that works around Bun blocking postinstall hooks, and gate the success banner on the health check: a broken install now prints PARTIAL INSTALL and exits 1 instead of lying green. (#1)
+- **Empty queries fail loudly.** `gbrain query ""` (and a bare `gbrain query`) exits 1 with a usage example instead of printing an error and exiting 0. The fix also unmasked a wider bug: PGLite's embedded runtime was overwriting the process exit code during engine shutdown, so every errored command on a PGLite brain exited 0. All errored commands now exit 1. (#10)
+- **`list_skills` troubleshooting matches reality.** The error messages and the Copilot docs now walk the two settings in order (`mcp.publish_skills`, then `mcp.skills_dir`, with the plugin install path as the example) instead of each pointing at a different key. (#6)
+- **Copilot docs got a first-run pass.** Prerequisites before the install commands, a deterministic three-step verification (MCP status, `get_brain_identity`, `gbrain doctor --json`) that works on an empty brain, a note that local stdio needs no token, platform-neutral example paths in the bundled skills, and the fork README now attributes the upstream author's first-person introduction as a quote. (#7)
+- **Fork hygiene.** `plugin.json` carries the full 4-segment version (it had silently dropped the micro segment), the one stale upstream raw URL in the docs bundle is rewritten to this fork, and the documentation privacy sweep now covers the changelog with the privacy CI gate enforcing it permanently. (#9, #10)
+
+### To take advantage of v0.42.39.0
+
+Existing brains: `gbrain upgrade`. No schema changes and no manual steps.
+
+Copilot CLI users: reinstall the plugin via the marketplace flow above to get the thin payload. If `gbrain doctor` exits 1 after the upgrade, that is the new warnings exit code doing its job; run `gbrain doctor --json` to see what it found.
+
 ## [0.42.38.1] - 2026-06-10
 
 **gbrain-copilot: this distribution is now a self-sufficient fork of [garrytan/gbrain](https://github.com/garrytan/gbrain) with first-class GitHub Copilot CLI support.** Install, upgrade, releases, skills, and docs all come from `jaypetez/gbrain-copilot`; nothing requires the upstream repo. All credit for GBrain itself belongs upstream — this release is the integration layer.
