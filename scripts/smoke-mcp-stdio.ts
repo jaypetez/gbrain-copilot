@@ -2,7 +2,8 @@
  * MCP stdio smoke test — proves `gbrain serve` speaks the exact transport
  * GitHub Copilot CLI (and Claude Code/Codex/Cursor) uses, without needing
  * any of those clients installed. Sends initialize → initialized →
- * tools/list over stdio and asserts a sane handshake + tool count.
+ * tools/list → tools/call whoami over stdio and asserts a sane handshake,
+ * tool count, and a non-error stdio identity (#4 regression guard).
  *
  * Usage: bun run scripts/smoke-mcp-stdio.ts [command...] (default: bun src/cli.ts serve)
  */
@@ -49,7 +50,8 @@ proc.on('exit', (code) => {
 function check() {
   const init = responses.find((r) => r.id === 1);
   const tools = responses.find((r) => r.id === 2);
-  if (!init || !tools) return;
+  const whoami = responses.find((r) => r.id === 3);
+  if (!init || !tools || !whoami) return;
   done = true;
   clearTimeout(timeout);
 
@@ -60,11 +62,16 @@ function check() {
   console.log(`tools: ${toolList.length}`);
   console.log(`sample tools: ${toolList.slice(0, 8).map((t: any) => t.name).join(', ')}`);
 
+  // #4 regression guard: whoami over local stdio must answer (transport:
+  // 'stdio'), not error with unknown_transport.
+  const whoamiOk = !whoami.result?.isError && !whoami.error;
+  console.log(`whoami: ${whoamiOk ? (whoami.result?.content?.[0]?.text ?? '').replace(/\s+/g, ' ').slice(0, 120) : 'ERROR'}`);
+
   const ok = serverInfo?.name && toolList.length >= 20 &&
     ['search', 'query', 'get_page', 'put_page', 'get_brain_identity'].every(
       (n) => toolList.some((t: any) => t.name === n),
-    );
-  console.log(ok ? 'SMOKE OK' : 'SMOKE FAIL: missing expected tools or serverInfo');
+    ) && whoamiOk;
+  console.log(ok ? 'SMOKE OK' : 'SMOKE FAIL: missing expected tools, serverInfo, or whoami errored');
   proc.kill();
   process.exit(ok ? 0 : 1);
 }
@@ -76,3 +83,4 @@ function send(obj: unknown) {
 send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '0' } } });
 send({ jsonrpc: '2.0', method: 'notifications/initialized' });
 send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
+send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'whoami', arguments: {} } });

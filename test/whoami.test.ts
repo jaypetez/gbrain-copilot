@@ -118,6 +118,54 @@ describe('whoami op contract', () => {
       expect(e).toBeInstanceOf(OperationError);
     }
   });
+
+  // Local stdio MCP (#4): remote stays true (fail-closed gates unchanged)
+  // but the transport tag lets whoami return identity instead of throwing.
+  test('stdio transport tag (remote=true, no auth) returns stdio identity shape', async () => {
+    const result = (await whoami.handler(
+      ctxWith({
+        remote: true,
+        auth: undefined,
+        transport: 'stdio',
+        sourceId: 'default',
+        takesHoldersAllowList: ['world'],
+      }),
+      {},
+    )) as any;
+    expect(result.transport).toBe('stdio');
+    expect(typeof result.user).toBe('string');
+    expect(result.user.length).toBeGreaterThan(0);
+    expect(result.source_id).toBe('default');
+    expect(result.takes_holders).toEqual(['world']);
+    // scopes MUST be [] (mirrors the 'local' shape) so hasScope([]) stays
+    // false — the tag is identity, never a capability grant.
+    expect(result.scopes).toEqual([]);
+  });
+
+  test('real auth beats the stdio tag (oauth shape returned)', async () => {
+    const auth: AuthInfo = {
+      token: 'gbrain_at_xxx',
+      clientId: 'gbrain_cl_abc',
+      clientName: 'gstack-test',
+      scopes: ['read'],
+      expiresAt: 1234567890,
+    };
+    const result = (await whoami.handler(
+      ctxWith({ remote: true, auth, transport: 'stdio' }),
+      {},
+    )) as any;
+    expect(result.transport).toBe('oauth');
+    expect(result.client_id).toBe('gbrain_cl_abc');
+  });
+
+  test('remote=false beats the stdio tag (local shape returned)', async () => {
+    const result = (await whoami.handler(
+      ctxWith({ remote: false, transport: 'stdio' }),
+      {},
+    )) as any;
+    expect(result.transport).toBe('local');
+    expect(result.scopes).toEqual([]);
+  });
 });
 
 describe('whoami op metadata', () => {
