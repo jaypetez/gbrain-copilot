@@ -317,6 +317,8 @@ Rules:
   (`--json` payloads, final summaries, JSON action events from `extract`).
 - Non-TTY default: plain one-line-per-event human text. JSON requires the
   explicit `--progress-json` flag.
+- Non-TTY human mode coalesces heartbeat lines to at most one per
+  `--progress-interval` (default 1000ms); JSON mode emits every event.
 - Global flags (`--quiet`, `--progress-json`, `--progress-interval=<ms>`)
   are parsed by `src/core/cli-options.ts` BEFORE command dispatch.
 - Phase names are machine-stable `snake_case.dot.path` (e.g.
