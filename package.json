@@ -59,6 +59,7 @@
     "check:skill-brain-first": "scripts/check-skill-brain-first.sh",
     "check:wasm": "scripts/check-wasm-embedded.sh",
     "check:newlines": "scripts/check-trailing-newline.sh",
+    "check:fork-hygiene": "scripts/check-fork-hygiene.sh",
     "test:e2e": "bash scripts/run-e2e.sh",
     "test:slow": "bash scripts/run-slow-tests.sh",
     "test:heavy": "bash scripts/run-heavy.sh",
