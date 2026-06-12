@@ -233,9 +233,12 @@ The three most important skills to adopt immediately:
 
 How the agent platform reaches the brain (MCP) and the skills:
 
-- **GitHub Copilot CLI** — one step inside `copilot`:
-  `/plugin install jaypetez/gbrain-copilot` registers the MCP server, all
-  skills, and the `gbrain` custom agent. Manual alternatives (mcp-config.json
+- **GitHub Copilot CLI** — inside `copilot`:
+  `/plugin marketplace add jaypetez/gbrain-copilot`, then
+  `/plugin install gbrain@gbrain-copilot` registers the MCP server, all
+  skills, and the `gbrain` custom agent (older Copilot CLI versions can
+  still use `/plugin install jaypetez/gbrain-copilot`, with a deprecation
+  warning and a whole-repo install). Manual alternatives (mcp-config.json
   entry, `/mcp add`, copying skills to `~/.copilot/skills/`) and the
   installer scripts (`scripts/install-copilot.ps1|sh`) are documented in
   `docs/mcp/COPILOT_CLI.md`. Pick ONE skills path (plugin or manual copy).

@@ -31,11 +31,17 @@ curl -fsSL https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/script
 ```
 
 **2. Install the plugin** (ships the skills + the gbrain agent + the MCP
-server entry in one step). Inside `copilot`:
+server entry). Inside `copilot`:
 
 ```
-/plugin install jaypetez/gbrain-copilot
+/plugin marketplace add jaypetez/gbrain-copilot
+/plugin install gbrain@gbrain-copilot
 ```
+
+(From a terminal: `copilot plugin marketplace add jaypetez/gbrain-copilot`,
+then `copilot plugin install gbrain@gbrain-copilot`. Older Copilot CLI
+versions can still use `/plugin install jaypetez/gbrain-copilot`, but it
+prints a deprecation warning and installs the whole repo.)
 
 **3. Verify.** `/mcp` should list `gbrain` as running. Then try:
 
@@ -52,8 +58,9 @@ gbrain init --pglite          # 2-second local brain, no server
 gbrain doctor                 # verify health
 ```
 
-Then wire the MCP server using any one of: `/plugin install
-jaypetez/gbrain-copilot`, the interactive `/mcp add` form, or by merging
+Then wire the MCP server using any one of: the plugin (`/plugin marketplace
+add jaypetez/gbrain-copilot` + `/plugin install gbrain@gbrain-copilot`),
+the interactive `/mcp add` form, or by merging
 this into `~/.copilot/mcp-config.json` (or `$COPILOT_HOME/mcp-config.json`):
 
 ```json
@@ -82,6 +89,11 @@ cycle): [`INSTALL_FOR_AGENTS.md`](INSTALL_FOR_AGENTS.md).
 
 Pick ONE skills path (plugin OR manual copy) — installing both produces
 duplicate skill names.
+
+Manifest note: `plugin.json` (and the generated `plugins/gbrain/plugin.json`
+payload manifest, built by `scripts/build-copilot-plugin.sh`) are the Copilot
+CLI manifests; `openclaw.plugin.json` is the upstream OpenClaw manifest,
+unused by Copilot CLI and intentionally not version-synced.
 
 ## Troubleshooting
 

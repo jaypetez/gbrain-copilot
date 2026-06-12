@@ -73,7 +73,7 @@ captured:
   slug:          inbox/2026-05-21-abcdef12
   status:        created_or_updated
   content_hash:  f3a7b9c0d1e2f3a4…
-  file:          /Users/you/brain/inbox/2026-05-21-abcdef12.md
+  file:          ~/brain/inbox/2026-05-21-abcdef12.md
   captured_at:   2026-05-21T04:15:00.000Z
 ```
 

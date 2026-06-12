@@ -2,9 +2,11 @@
 
 > **This is gbrain-copilot** — a self-sufficient fork of
 > [garrytan/gbrain](https://github.com/garrytan/gbrain) with first-class
-> **GitHub Copilot CLI** support: a `/plugin install jaypetez/gbrain-copilot`
-> one-liner that ships 50+ Agent Skills, a `gbrain` custom agent, and the MCP
-> server; `gbrain connect --agent copilot`; Windows/macOS/Linux installer
+> **GitHub Copilot CLI** support: a marketplace plugin
+> (`copilot plugin marketplace add jaypetez/gbrain-copilot` +
+> `copilot plugin install gbrain@gbrain-copilot`) that ships 50+ Agent
+> Skills, a `gbrain` custom agent, and the MCP server;
+> `gbrain connect --agent copilot`; Windows/macOS/Linux installer
 > scripts; and self-contained install + upgrade (you never need upstream).
 > **Copilot CLI users start at [`COPILOT.md`](COPILOT.md).** Everything below
 > is GBrain itself — Garry Tan's work, MIT, credited in
@@ -12,7 +14,7 @@
 
 **Search gives you raw pages. GBrain gives you the answer.** It's the brain layer your AI agent has been missing — the only one that does synthesis, graph traversal, and gap analysis in one box. Run a full autonomous agent on top of it, or just wire it into Claude Code or Codex as a supercharged retrieval layer in one command; either way your coding agent stops being amnesiac about everything that isn't code.
 
-I'm Garry Tan, President and CEO of Y Combinator. I built GBrain to run my own AI agents. It's the production brain behind my OpenClaw and Hermes deployments: **146,646 pages, 24,585 people, 5,339 companies**, 66 cron jobs running autonomously. My agent ingests meetings, emails, tweets, voice calls, and original ideas while I sleep. It enriches every person and company it encounters. It fixes its own citations and consolidates memory overnight. I wake up smarter than when I went to bed — and so will you.
+> **From the upstream author - Garry Tan, President & CEO of Y Combinator:** "I built GBrain to run my own AI agents. It's the production brain behind my OpenClaw and Hermes deployments: **146,646 pages, 24,585 people, 5,339 companies**, 66 cron jobs running autonomously. My agent ingests meetings, emails, tweets, voice calls, and original ideas while I sleep. It enriches every person and company it encounters. It fixes its own citations and consolidates memory overnight. I wake up smarter than when I went to bed — and so will you."
 
 **And now it works as a company brain too.** Each person on the team gets their own slice of the brain, scoped by login. When you query, you only see what you're allowed to see — never another person's notes, never another team's data. We fuzz-tested this across every way you can read the brain (search, list, lookup, multi-source reads) and got zero leaks. Drop GBrain in as your team's shared institutional memory — the [company-brain](https://www.ycombinator.com/rfs#company-brain) shape YC just put on its Request for Startups. If you're building in that space, you might as well build on this. **[Tutorial: set up GBrain as your company brain →](docs/tutorials/company-brain.md)**
 
@@ -105,8 +107,11 @@ irm https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/scripts/insta
 ```
 
 ```
-/plugin install jaypetez/gbrain-copilot    # inside copilot: skills + gbrain agent + MCP server
+copilot plugin marketplace add jaypetez/gbrain-copilot
+copilot plugin install gbrain@gbrain-copilot    # skills + gbrain agent + MCP server
 ```
+
+(In a `copilot` session: `/plugin marketplace add jaypetez/gbrain-copilot`, then `/plugin install gbrain@gbrain-copilot`. Older Copilot CLI versions can still use `/plugin install jaypetez/gbrain-copilot`, but it prints a deprecation warning and installs the whole repo.)
 
 Full walkthrough: [`COPILOT.md`](COPILOT.md) · connection reference: [`docs/mcp/COPILOT_CLI.md`](docs/mcp/COPILOT_CLI.md).
 
@@ -158,7 +163,7 @@ Postgres-at-scale, Supabase, and thin-client setup paths live in [`docs/INSTALL.
 
 GBrain exposes 30+ tools over MCP (stdio and HTTP). The specific snippet depends on which client you use:
 
-- **[GitHub Copilot CLI](docs/mcp/COPILOT_CLI.md)** — one step: `/plugin install jaypetez/gbrain-copilot` (MCP server + skills + the `gbrain` agent). Or local stdio via `~/.copilot/mcp-config.json` / `/mcp add`; remote via `gbrain connect https://your-host/mcp --token gbrain_xxx --agent copilot --install`.
+- **[GitHub Copilot CLI](docs/mcp/COPILOT_CLI.md)** — two steps: `copilot plugin marketplace add jaypetez/gbrain-copilot`, then `copilot plugin install gbrain@gbrain-copilot` (MCP server + skills + the `gbrain` agent). Or local stdio via `~/.copilot/mcp-config.json` / `/mcp add`; remote via `gbrain connect https://your-host/mcp --token gbrain_xxx --agent copilot --install`.
 - **[Claude Code](docs/mcp/CLAUDE_CODE.md)** — local: one command, `claude mcp add gbrain -- gbrain serve` (zero server, zero tunnel). Remote with just a bearer token: `gbrain connect https://your-host/mcp --token gbrain_xxx` prints a paste-ready block (or `--install` wires it up and smoke-tests the token).
 - **[Codex](docs/mcp/CODEX.md)** — `gbrain connect https://your-host/mcp --token gbrain_xxx --agent codex` (or `--install`). Codex reads the bearer from `$GBRAIN_REMOTE_TOKEN` at runtime, so the token never lands in Codex config.
 - **[Cursor / Windsurf / any stdio MCP client](docs/mcp/CLAUDE_CODE.md)** — same shape, add `{"command": "gbrain", "args": ["serve"]}` to your MCP config.
@@ -466,7 +471,7 @@ gbrain-copilot is a fork of [garrytan/gbrain](https://github.com/garrytan/gbrain
 
 ## License + credit
 
-MIT. I built GBrain to run my OpenClaw and Hermes deployments — the production brain behind my AI agents.
+MIT. Garry Tan built GBrain to run his OpenClaw and Hermes deployments — the production brain behind his AI agents.
 
 Origin story: [`docs/ethos/ORIGIN.md`](docs/ethos/ORIGIN.md).
 

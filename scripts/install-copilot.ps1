@@ -10,7 +10,8 @@
 #   -Yes         Non-interactive: accept prompts, replace an existing gbrain
 #                MCP entry if present.
 #   -CopySkills  Also copy the bundled skills to ~/.copilot/skills/ (skip if
-#                you plan to use `/plugin install jaypetez/gbrain-copilot`,
+#                you plan to install the plugin via `/plugin marketplace add
+#                jaypetez/gbrain-copilot` + `/plugin install gbrain@gbrain-copilot`,
 #                which ships them — using both duplicates skill names).
 #   -SkipInit    Skip `gbrain init` (brain already exists).
 #
@@ -117,14 +118,14 @@ if ($CopySkills) {
   Step 'Copying skills to ~/.copilot/skills/'
   $skillsSrc = Join-Path $PSScriptRoot '..\skills'
   if (-not (Test-Path $skillsSrc)) {
-    Write-Warning 'skills/ not found next to this script (one-liner install?). Use /plugin install jaypetez/gbrain-copilot inside copilot instead.'
+    Write-Warning 'skills/ not found next to this script (one-liner install?). Use /plugin marketplace add jaypetez/gbrain-copilot then /plugin install gbrain@gbrain-copilot inside copilot instead.'
   } else {
     $skillsDest = Join-Path $copilotHome 'skills'
     New-Item -ItemType Directory -Force -Path $skillsDest | Out-Null
     Get-ChildItem $skillsSrc -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'SKILL.md') } | ForEach-Object {
       Copy-Item $_.FullName -Destination (Join-Path $skillsDest $_.Name) -Recurse -Force
     }
-    Write-Host "Copied skills to $skillsDest (do NOT also /plugin install, or skill names will collide)"
+    Write-Host "Copied skills to $skillsDest (do NOT also install the plugin, or skill names will collide)"
   }
 }
 
@@ -138,8 +139,9 @@ Write-Host ' gbrain is wired into GitHub Copilot CLI. Next steps:' -ForegroundCo
 Write-Host '   1. copilot                      # start Copilot CLI'
 Write-Host '   2. /mcp                         # confirm gbrain is running'
 if (-not $CopySkills) {
-  Write-Host '   3. /plugin install jaypetez/gbrain-copilot   # skills + gbrain agent'
+  Write-Host '   3. /plugin marketplace add jaypetez/gbrain-copilot'
+  Write-Host '   4. /plugin install gbrain@gbrain-copilot     # skills + gbrain agent'
 }
-Write-Host '   4. ask: "search my brain for <topic>"'
+Write-Host '   5. ask: "search my brain for <topic>"'
 Write-Host ' Docs: COPILOT.md and docs/mcp/COPILOT_CLI.md' -ForegroundColor Green
 Write-Host '=============================================================' -ForegroundColor Green

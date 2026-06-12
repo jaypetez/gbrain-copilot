@@ -5,20 +5,34 @@
 > the connection reference. Copilot CLI here means the agentic terminal tool
 > (`npm i -g @github/copilot`, command `copilot`) — not the old gh extension.
 
-## Option 0: Plugin (one step, ships everything)
+## Option 0: Plugin (recommended)
 
-Inside `copilot`:
+> **Prerequisites:** the `gbrain` CLI on PATH and a brain initialized — run
+> `scripts/install-copilot.ps1` (Windows) or `scripts/install-copilot.sh`
+> (macOS/Linux) first. Quick check: `gbrain --version && gbrain doctor`.
+
+From a terminal:
+
+```bash
+copilot plugin marketplace add jaypetez/gbrain-copilot
+copilot plugin install gbrain@gbrain-copilot
+```
+
+Or inside a `copilot` session:
 
 ```
-/plugin install jaypetez/gbrain-copilot
+/plugin marketplace add jaypetez/gbrain-copilot
+/plugin install gbrain@gbrain-copilot
 ```
 
 This registers the `gbrain` MCP server (local stdio), all bundled skills,
-and the `gbrain` custom agent from one manifest ([`plugin.json`](../../plugin.json)).
-Prerequisite: the `gbrain` CLI must be on PATH (`bun install -g
-github:jaypetez/gbrain-copilot`, or run `scripts/install-copilot.ps1` /
-`scripts/install-copilot.sh`). If `/mcp` shows gbrain failing to start,
-that prerequisite is what's missing.
+and the `gbrain` custom agent from the marketplace manifest
+([`.github/plugin/marketplace.json`](../../.github/plugin/marketplace.json),
+payload manifest [`plugins/gbrain/plugin.json`](../../plugins/gbrain/plugin.json)).
+Older Copilot CLI versions can still use `/plugin install
+jaypetez/gbrain-copilot`, but it prints a deprecation warning and installs
+the whole repo. If `/mcp` shows gbrain failing to start, the prerequisites
+above are what's missing.
 
 ## Option 1: Local stdio (no plugin, zero server)
 
@@ -99,15 +113,18 @@ Replace `YOUR_TOKEN` with a token from `gbrain auth create "copilot"`.
 > in plaintext in `mcp-config.json` — keep that file private, and prefer a
 > scoped/short-lived token where your host supports one.
 
+> Local stdio (Options 0-1) needs NO token at all — `gbrain serve` runs as
+> your OS user; tokens only apply to remote HTTP (Options 2-3).
+
 ## Verify
 
-In Copilot CLI, `/mcp` should list `gbrain` as running. Then try:
+A deterministic 3-step smoke test:
 
-```
-search for [any topic in your brain]
-```
-
-You should see results from your GBrain knowledge base.
+1. In Copilot CLI, `/mcp` lists `gbrain` as running.
+2. Ask the session to call `get_brain_identity` — it returns identity JSON
+   even on an empty brain (unlike `search`, which is empty on a fresh brain
+   and indistinguishable from a broken install).
+3. `gbrain doctor --json` shows `"status": "ok"` (or warnings).
 
 > **`list_skills` returns nothing?** Skill discovery is gated by
 > `mcp.publish_skills` on the host. New brains from `gbrain init` default it
@@ -119,7 +136,8 @@ You should see results from your GBrain knowledge base.
 
 ## Skills and the custom agent
 
-- **Via the plugin (recommended):** `/plugin install jaypetez/gbrain-copilot`
+- **Via the plugin (recommended):** `/plugin marketplace add
+  jaypetez/gbrain-copilot`, then `/plugin install gbrain@gbrain-copilot`
   ships all `skills/*/SKILL.md` and the `gbrain` agent
   (`.github/agents/gbrain.agent.md`; select it with `/agent`).
 - **Manual skills:** copy skill directories into `~/.copilot/skills/`

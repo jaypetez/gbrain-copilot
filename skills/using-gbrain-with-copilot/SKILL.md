@@ -52,8 +52,11 @@ This skill guarantees:
 ## Wiring (pick exactly ONE skills path)
 
 - **Plugin (recommended):** inside `copilot`, run
-  `/plugin install jaypetez/gbrain-copilot`. Ships the MCP server entry,
-  all bundled skills, and the `gbrain` custom agent in one step.
+  `/plugin marketplace add jaypetez/gbrain-copilot`, then
+  `/plugin install gbrain@gbrain-copilot`. Ships the MCP server entry,
+  all bundled skills, and the `gbrain` custom agent. (Older Copilot CLI
+  versions can still use `/plugin install jaypetez/gbrain-copilot`, with a
+  deprecation warning and a whole-repo install.)
 - **Manual local:** merge
   `{"mcpServers":{"gbrain":{"type":"local","command":"gbrain","args":["serve"],"tools":["*"]}}}`
   into `~/.copilot/mcp-config.json` (honors `$COPILOT_HOME`), or use the
