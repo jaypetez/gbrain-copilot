@@ -47,7 +47,8 @@ This skill guarantees:
    (macOS/Linux), or: install Bun, then
    `bun install -g github:jaypetez/gbrain-copilot`.
 2. `gbrain doctor --json` — every check should pass. A missing brain means
-   `gbrain init --pglite` has not run yet.
+   `gbrain init --pglite` has not run yet. Exit code: 0 = healthy,
+   1 = warnings, 2 = failures.
 
 ## Wiring (pick exactly ONE skills path)
 

@@ -115,10 +115,12 @@ describe('v0.42 type-unification E2E (IRON RULE)', () => {
     const preDistinct = parseInt(preTypes[0].cnt, 10);
     expect(preDistinct).toBeGreaterThanOrEqual(20);
 
-    // Onboard surfaces pack_upgrade_available
+    // Onboard surfaces pack_upgrade_available (ok + hint per issue #5 —
+    // the remediation step is the actionable signal, not a warn status)
     const checks = await runAllOnboardChecks(engine);
     const packUpgrade = checks.find(c => c.check.name === 'pack_upgrade_available');
-    expect(packUpgrade?.check.status).toBe('warn');
+    expect(packUpgrade?.check.status).toBe('ok');
+    expect(packUpgrade?.check.message).toContain('Successor available');
     expect(packUpgrade?.remediations[0]?.job).toBe('unify-types');
 
     // Dry-run
@@ -174,10 +176,13 @@ describe('v0.42 type-unification E2E (IRON RULE)', () => {
     expect(linkRows.length).toBe(1);
     expect(linkRows[0].link_type).toBe('partner_of');
 
-    // Onboard checks clear post-unify
+    // Onboard checks clear post-unify. Since pack_upgrade_available is now
+    // ok in BOTH states (issue #5), pin the message to prove the successor
+    // hint actually cleared.
     const checksAfter = await runAllOnboardChecks(engine);
     const packUpgradeAfter = checksAfter.find(c => c.check.name === 'pack_upgrade_available');
     expect(packUpgradeAfter?.check.status).toBe('ok');
+    expect(packUpgradeAfter?.check.message).not.toContain('Successor available');
     const typeProlifAfter = checksAfter.find(c => c.check.name === 'type_proliferation');
     expect(typeProlifAfter?.check.status).toBe('ok');
 

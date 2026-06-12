@@ -146,6 +146,65 @@ describe('progress reporter', () => {
     expect(hb[0].done).toBeUndefined();
   });
 
+  test('human-plain: rapid heartbeats coalesce to one line per interval window', () => {
+    const { stream, read } = sink(false);
+    const p = createProgress({ mode: 'human', stream, minIntervalMs: 60000 });
+    p.start('doctor.db_checks');
+    for (let i = 0; i < 10; i++) p.heartbeat(`check_${i}`);
+    p.finish();
+    const lines = read().split('\n').filter((l) => l.includes('check_'));
+    // First heartbeat after start() always emits; the 9 rapid follow-ups
+    // fall inside the (minIntervalMs - 100) window and coalesce away.
+    expect(lines.length).toBe(1);
+    expect(lines[0]).toContain('check_0');
+  });
+
+  test('human-plain: heartbeats spaced wider than the interval all emit', async () => {
+    const { stream, read } = sink(false);
+    // window = max(0, 150 - 100) = 50ms; 80ms spacing clears it every time.
+    const p = createProgress({ mode: 'human', stream, minIntervalMs: 150 });
+    p.start('slow_query');
+    p.heartbeat('beat_0');
+    await new Promise((r) => setTimeout(r, 80));
+    p.heartbeat('beat_1');
+    await new Promise((r) => setTimeout(r, 80));
+    p.heartbeat('beat_2');
+    p.finish();
+    const out = read();
+    expect(out).toContain('beat_0');
+    expect(out).toContain('beat_1');
+    expect(out).toContain('beat_2');
+  });
+
+  test('human-plain: first heartbeat after start() always emits (even after a prior phase)', () => {
+    const { stream, read } = sink(false);
+    const p = createProgress({ mode: 'human', stream, minIntervalMs: 60000 });
+    p.start('phase_a');
+    p.heartbeat('a_first');
+    p.heartbeat('a_suppressed');
+    p.finish();
+    p.start('phase_b');
+    p.heartbeat('b_first'); // fresh phase state — must emit despite phase_a's recent beat
+    p.finish();
+    const out = read();
+    expect(out).toContain('a_first');
+    expect(out).not.toContain('a_suppressed');
+    expect(out).toContain('b_first');
+  });
+
+  test('json mode: heartbeats are NOT coalesced — every event emits', () => {
+    const { stream, read } = sink(false);
+    const p = createProgress({ mode: 'json', stream, minIntervalMs: 60000 });
+    p.start('slow_query');
+    p.heartbeat('still scanning…');
+    p.heartbeat('still scanning…');
+    p.heartbeat('still scanning…');
+    p.finish();
+    const events = parseJsonl(read());
+    const hb = events.filter((e) => e.event === 'heartbeat');
+    expect(hb.length).toBe(3);
+  });
+
   test('child() composes phase path with dots', () => {
     const { stream, read } = sink(false);
     const p = createProgress({ mode: 'json', stream, minIntervalMs: 0, minItems: 1 });

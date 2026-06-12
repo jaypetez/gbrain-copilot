@@ -157,6 +157,9 @@ interface PhaseState {
   startedAt: number;
   lastEmitMs: number;
   lastDoneEmitted: number;
+  // Coalescing gate for human-plain heartbeat lines. Initialized to 0 in
+  // start() so the FIRST heartbeat of a phase always emits.
+  lastHeartbeatEmitMs: number;
   heartbeatTimer?: ReturnType<typeof setInterval>;
   live: LivePhase | null; // membership in liveReporters for signal cleanup
 }
@@ -246,6 +249,7 @@ class Reporter implements ReporterInternal {
       startedAt: now,
       lastEmitMs: now,
       lastDoneEmitted: 0,
+      lastHeartbeatEmitMs: 0,
       live: null,
     };
     this.state = s;
@@ -331,6 +335,18 @@ class Reporter implements ReporterInternal {
         ts: nowIso(),
       });
     } else {
+      // human-plain coalescing: non-TTY human output is line-per-event, so a
+      // burst of heartbeats (e.g. doctor naming each fast check) floods the
+      // log with dozens of lines. Cap at ~one line per minIntervalMs window;
+      // the -100ms slack keeps a timer-driven startHeartbeat(=interval) from
+      // skipping alternate beats under jitter. First heartbeat after start()
+      // always emits (lastHeartbeatEmitMs starts at 0). TTY mode is exempt —
+      // its \r rewrite never adds lines. JSON mode emits every event (the
+      // JSONL stream is the machine contract; consumers do their own rates).
+      if (this.renderMode === 'human-plain') {
+        if (now - s.lastHeartbeatEmitMs < Math.max(0, this.minIntervalMs - 100)) return;
+        s.lastHeartbeatEmitMs = now;
+      }
       this.emitHumanLine(renderHumanLine(s.phase, undefined, undefined, note));
     }
   }

@@ -1,15 +1,17 @@
 /**
  * Drift guard for src/core/doctor-categories.ts.
  *
- * Reads src/commands/doctor.ts source via a literal-string scan, enumerates
- * every `name: '<...>'` Check name, and asserts each appears in exactly ONE
- * category set. The union of the four sets must equal the discovered names
- * exactly — no orphans, no extras.
+ * Reads every check-emitter module's source (CHECK_EMITTER_FILES below) via
+ * a literal-string scan, enumerates every `name: '<...>'` Check name, and
+ * asserts each appears in exactly ONE category set. The union of the four
+ * sets must equal the discovered names exactly — no orphans, no extras.
  *
  * This is the structural failure the v0.41.19.0 plan-eng-review caught:
  * doctor.ts grows new checks regularly; without this guard, the
  * categorization map silently goes stale and unknown checks degrade to
- * 'meta' without anyone noticing.
+ * 'meta' without anyone noticing. (The v0.41.18.0 onboard checks escaped
+ * for exactly this reason — they're emitted from onboard/checks.ts, which
+ * the original doctor.ts-only scan never saw.)
  */
 
 import { describe, test, expect, beforeEach } from 'bun:test';
@@ -24,27 +26,54 @@ import {
   _resetUnknownCheckWarningsForTest,
 } from '../src/core/doctor-categories.ts';
 
-const DOCTOR_TS_PATH = join(import.meta.dir, '..', 'src', 'commands', 'doctor.ts');
+// Every module that emits doctor Check objects. When a new module starts
+// emitting checks that get merged into doctor's list (the way
+// src/core/onboard/checks.ts is merged by buildChecks), ADD IT HERE —
+// otherwise its check names escape the drift guard and silently degrade
+// to the 'meta' category at runtime.
+const CHECK_EMITTER_FILES = [
+  'src/commands/doctor.ts',
+  'src/core/onboard/checks.ts',
+];
 
 function enumerateCheckNames(): Set<string> {
-  const source = readFileSync(DOCTOR_TS_PATH, 'utf-8');
   const names = new Set<string>();
-  // 1) Inline object-literal form: `{ name: 'foo', ... }`.
-  for (const m of source.matchAll(/name:\s*['"]([a-z][a-z0-9_]+)['"]/g)) {
-    names.add(m[1]);
-  }
-  // 2) Helper-function form: `const name = 'foo';` inside a check helper.
-  //    Catches checks like `nightly_quality_probe_health` and
-  //    `conversation_facts_backlog` that build the Check from a captured
-  //    name constant.
-  for (const m of source.matchAll(/const\s+name\s*=\s*['"]([a-z][a-z0-9_]+)['"]/g)) {
-    names.add(m[1]);
+  for (const rel of CHECK_EMITTER_FILES) {
+    const source = readFileSync(join(import.meta.dir, '..', rel), 'utf-8');
+    // 1) Inline object-literal form: `{ name: 'foo', ... }`.
+    for (const m of source.matchAll(/name:\s*['"]([a-z][a-z0-9_]+)['"]/g)) {
+      names.add(m[1]);
+    }
+    // 2) Helper-function form: `const name = 'foo';` inside a check helper.
+    //    Catches checks like `nightly_quality_probe_health` and
+    //    `conversation_facts_backlog` that build the Check from a captured
+    //    name constant.
+    for (const m of source.matchAll(/const\s+name\s*=\s*['"]([a-z][a-z0-9_]+)['"]/g)) {
+      names.add(m[1]);
+    }
   }
   return names;
 }
 
 describe('doctor-categories drift guard', () => {
-  test('every check name in doctor.ts source belongs to exactly one category set', () => {
+  test('the onboard checks merged into doctor are discovered by the scan', () => {
+    // Regression pin: these 7 ship from src/core/onboard/checks.ts (not
+    // doctor.ts), which is why the original single-file scan missed them.
+    const discovered = enumerateCheckNames();
+    const onboardNames = [
+      'embed_staleness',
+      'entity_link_coverage',
+      'timeline_coverage',
+      'takes_count',
+      'pack_upgrade_available',
+      'type_proliferation',
+      'dangling_aliases',
+    ];
+    const missing = onboardNames.filter((n) => !discovered.has(n));
+    expect(missing).toEqual([]);
+  });
+
+  test('every check name in the emitter modules belongs to exactly one category set', () => {
     const discovered = enumerateCheckNames();
     const allCategorized = new Set<string>([
       ...BRAIN_CHECK_NAMES,
@@ -59,8 +88,8 @@ describe('doctor-categories drift guard', () => {
     }
     if (missing.length > 0) {
       throw new Error(
-        `These check names appear in doctor.ts but are not categorized in ` +
-          `src/core/doctor-categories.ts: ${missing.sort().join(', ')}. ` +
+        `These check names appear in a check-emitter module (${CHECK_EMITTER_FILES.join(', ')}) ` +
+          `but are not categorized in src/core/doctor-categories.ts: ${missing.sort().join(', ')}. ` +
           `Add each to BRAIN/SKILL/OPS/META_CHECK_NAMES.`,
       );
     }
@@ -86,7 +115,7 @@ describe('doctor-categories drift guard', () => {
     expect(dupes).toEqual([]);
   });
 
-  test('every categorized name is currently used in doctor.ts source (no stale entries)', () => {
+  test('every categorized name is currently used in an emitter module (no stale entries)', () => {
     const discovered = enumerateCheckNames();
     const allCategorized = new Set<string>([
       ...BRAIN_CHECK_NAMES,
@@ -106,7 +135,8 @@ describe('doctor-categories drift guard', () => {
     // refactors require more headroom.
     if (stale.length > 2) {
       throw new Error(
-        `These categorized names no longer appear in doctor.ts: ${stale.sort().join(', ')}. ` +
+        `These categorized names no longer appear in any emitter module ` +
+          `(${CHECK_EMITTER_FILES.join(', ')}): ${stale.sort().join(', ')}. ` +
           `Remove them from src/core/doctor-categories.ts.`,
       );
     }

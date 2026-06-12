@@ -2111,7 +2111,7 @@ SETUP
   migrate --to <supabase|pglite>     Transfer brain between engines
   upgrade                            Self-update
   check-update [--json]              Check for new versions
-  doctor [--json] [--fast]            Health check (resolver, skills, pgvector, RLS, embeddings)
+  doctor [--json] [--fast]            Health check (resolver, skills, pgvector, RLS, embeddings); exit 0=healthy 1=warnings 2=failures
   integrations [subcommand]          Manage integration recipes (senses + reflexes)
 
 PAGES

@@ -334,7 +334,7 @@ your operational heartbeat.
 
 Run `gbrain doctor --json` and check for degradation. Report any failing checks
 to the user. Key signals: connection health, schema version, RLS status, embedding
-staleness.
+staleness. The exit code summarizes the run: 0 = healthy, 1 = warnings, 2 = failures.
 
 ### Weekly maintenance
 
