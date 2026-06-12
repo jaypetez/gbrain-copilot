@@ -14,14 +14,18 @@
     "second-brain",
     "gbrain"
   ],
-  "agents": ".github/agents",
+  "agents": "agents",
   "skills": "skills",
   "mcpServers": {
     "gbrain": {
       "type": "local",
       "command": "gbrain",
-      "args": ["serve"],
-      "tools": ["*"]
+      "args": [
+        "serve"
+      ],
+      "tools": [
+        "*"
+      ]
     }
   }
 }
