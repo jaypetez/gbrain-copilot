@@ -8,8 +8,10 @@
 # Usage (from a clone):  ./scripts/install-copilot.sh [--yes] [--copy-skills] [--skip-init]
 # Usage (one-liner):     curl -fsSL https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/scripts/install-copilot.sh | bash
 #
-#   --yes          Non-interactive: accept prompts, replace an existing
-#                  gbrain MCP entry if present.
+#   --yes          Non-interactive: unattended `gbrain init` (embedding
+#                  provider auto-resolved from env keys; no keys =
+#                  --no-embedding) and replace an existing gbrain MCP entry
+#                  if present.
 #   --copy-skills  Also copy bundled skills to ~/.copilot/skills/ (skip if
 #                  you plan to use `/plugin install jaypetez/gbrain-copilot`,
 #                  which ships them — using both duplicates skill names).
@@ -50,18 +52,58 @@ command -v gbrain >/dev/null 2>&1 || export PATH="$HOME/.bun/bin:$PATH"
 command -v gbrain >/dev/null 2>&1 || { echo "gbrain not on PATH after install (try: bun pm bin -g)" >&2; exit 1; }
 echo "gbrain $(gbrain --version)"
 
-# Bun sometimes skips the postinstall hook on global installs — run the
-# migrations explicitly (idempotent; no-op on a fresh install with no brain).
-step "Applying schema migrations (idempotent)"
-gbrain apply-migrations --yes --non-interactive || echo "WARN: apply-migrations reported an issue; gbrain doctor will diagnose after init." >&2
+# Bun blocks the postinstall hook on global installs (the "Blocked 1
+# postinstall" message above) — run the migrations explicitly (idempotent;
+# no-op on a fresh install with no brain).
+step "Applying schema migrations (works around Bun blocking the postinstall hook)"
+MIG_EXIT=0
+MIG_OUT="$(gbrain apply-migrations --yes --non-interactive 2>&1)" || MIG_EXIT=$?
+if [ -n "$MIG_OUT" ]; then
+  printf '%s\n' "$MIG_OUT"
+else
+  echo "(no output: fresh install - no brain yet, so nothing to migrate; init comes next)"
+fi
+if [ "$MIG_EXIT" -ne 0 ]; then
+  echo "WARN: apply-migrations reported an issue; gbrain doctor will diagnose after init." >&2
+fi
 
 # --- 3. Brain -------------------------------------------------------------------
 if [ "$SKIP_INIT" -eq 0 ]; then
   step "Creating the brain (PGLite, local, no server)"
-  echo "NOTE: init may ask about embedding providers and search mode — answer the prompts."
   if [ "$YES" -eq 1 ]; then
-    gbrain init --pglite --yes || echo "WARN: gbrain init did not complete cleanly; run gbrain doctor." >&2
+    # gbrain init has no --yes flag; --pglite --non-interactive is the
+    # unattended path. Detect embedding provider keys to pick the right flags.
+    EMBED_KEYS=""
+    EMBED_KEY_COUNT=0
+    for k in OPENAI_API_KEY ZEROENTROPY_API_KEY VOYAGE_API_KEY GOOGLE_GENERATIVE_AI_API_KEY DASHSCOPE_API_KEY MINIMAX_API_KEY OPENROUTER_API_KEY ZHIPUAI_API_KEY; do
+      if [ -n "${!k:-}" ]; then
+        EMBED_KEYS="$EMBED_KEYS $k"
+        EMBED_KEY_COUNT=$((EMBED_KEY_COUNT + 1))
+      fi
+    done
+    if [ -n "${AZURE_OPENAI_API_KEY:-}" ] && [ -n "${AZURE_OPENAI_ENDPOINT:-}" ] && [ -n "${AZURE_OPENAI_DEPLOYMENT:-}" ]; then
+      EMBED_KEYS="$EMBED_KEYS AZURE_OPENAI_*"
+      EMBED_KEY_COUNT=$((EMBED_KEY_COUNT + 1))
+    fi
+    EMBED_KEYS="${EMBED_KEYS# }"
+    # The search-mode picker checks stdin's TTY directly and ignores
+    # --non-interactive, so stdin must come from /dev/null or init stalls on
+    # a hidden menu.
+    if [ "$EMBED_KEY_COUNT" -eq 0 ]; then
+      echo "WARN: no embedding provider API key detected (OPENAI_API_KEY, VOYAGE_API_KEY, ...)." >&2
+      echo "WARN: creating the brain WITHOUT embeddings — keyword search works; semantic search is disabled." >&2
+      echo "WARN: to enable later: set a provider key, then run: gbrain config set embedding_model openai:text-embedding-3-large" >&2
+      gbrain init --pglite --non-interactive --no-embedding </dev/null \
+        || echo "WARN: gbrain init did not complete cleanly; run gbrain doctor." >&2
+    else
+      if [ "$EMBED_KEY_COUNT" -gt 1 ]; then
+        echo "WARN: multiple embedding provider keys detected ($EMBED_KEYS); init refuses the ambiguity non-interactively (exits with its own disambiguation message) — the health check below turns that into a PARTIAL INSTALL." >&2
+      fi
+      gbrain init --pglite --non-interactive </dev/null \
+        || echo "WARN: gbrain init did not complete cleanly; run gbrain doctor." >&2
+    fi
   else
+    echo "NOTE: init may ask about embedding providers and search mode — answer the prompts."
     gbrain init --pglite || echo "WARN: gbrain init did not complete cleanly; run gbrain doctor." >&2
   fi
 else
@@ -118,7 +160,27 @@ fi
 
 # --- 6. Verify + next steps -----------------------------------------------------------
 step "Health check"
-gbrain doctor || true
+DOCTOR_EXIT=0
+DOCTOR_OUT="$(gbrain doctor 2>&1)" || DOCTOR_EXIT=$?
+printf '%s\n' "$DOCTOR_OUT"
+# doctor exits 0=ok, 1=warnings, 2+=failure. Warnings are expected on a fresh
+# --no-embedding brain; only a hard failure (or no brain at all) is partial.
+if [ "$DOCTOR_EXIT" -ge 2 ] || printf '%s' "$DOCTOR_OUT" | grep -q 'No brain configured'; then
+  cat >&2 <<'EOF'
+
+=============================================================
+ PARTIAL INSTALL: the gbrain MCP entry was written, but the
+ brain is not healthy — Copilot CLI will list gbrain, but
+ queries will fail.
+   Fix:      gbrain init --pglite   (then re-run this script)
+   Diagnose: gbrain doctor --json
+=============================================================
+EOF
+  exit 1
+fi
+if [ "$DOCTOR_EXIT" -eq 1 ]; then
+  echo "NOTE: gbrain doctor reported warnings (exit 1) — expected for a fresh brain without embeddings."
+fi
 
 cat <<'EOF'
 
