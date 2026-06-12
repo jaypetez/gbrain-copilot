@@ -35,11 +35,14 @@ export interface ServeOptions {
   // Defaults to the real implementation when omitted.
   startMcpServer?: (engine: BrainEngine) => Promise<void>;
   // Test seam for the parent-process watchdog. The default
-  // (`readLiveParentPid`) reads the live kernel PPID via `ps` because
-  // `process.ppid` is captured at process creation and does not refresh
-  // on re-parent (Node/Bun parity). Tests inject a stub so they can
-  // simulate the parent dying without spawning ps or re-parenting any
-  // real process.
+  // (`defaultGetParentPid`) is platform-routed: POSIX hosts use
+  // `readLiveParentPid` (live kernel PPID via `ps`, because `process.ppid`
+  // is captured at process creation and does not refresh on re-parent —
+  // Node/Bun parity); win32 uses `readParentPidViaLivenessProbe`
+  // (signal-0 liveness check on the captured PPID — Windows never
+  // re-parents, so a dead parent is detected by the PID going dead, not
+  // by a PPID change). Tests inject a stub so they can simulate the
+  // parent dying without spawning ps or re-parenting any real process.
   getParentPid?: () => number;
   // Test seam: replace setInterval/clearInterval so the watchdog can
   // fire deterministically in tests instead of waiting 5s. Defaults to
@@ -157,10 +160,10 @@ function installStdioLifecycle(
     signals: opts.signals ?? process,
     exit: opts.exit ?? ((code?: number) => { process.exit(code); }),
     log: opts.log ?? ((msg: string) => console.error(msg)),
-    getParentPid: opts.getParentPid ?? readLiveParentPid,
+    getParentPid: opts.getParentPid ?? defaultGetParentPid,
     setInterval: opts.setInterval ?? ((fn, ms) => setInterval(fn, ms)),
     clearInterval: opts.clearInterval ?? ((h) => clearInterval(h as ReturnType<typeof setInterval>)),
-    probeWatchdog: opts.probeWatchdog ?? probeWatchdogAvailable,
+    probeWatchdog: opts.probeWatchdog ?? defaultProbeWatchdog,
   };
 
   let shuttingDown = false;
@@ -244,7 +247,11 @@ function installStdioLifecycle(
   // tmux, or a parent shell with PR_SET_CHILD_SUBREAPER). Polling is the
   // only portable way to notice; see `readLiveParentPid` for why we
   // cannot rely on `process.ppid` (cached at process creation and never
-  // refreshed on re-parent in Node or Bun).
+  // refreshed on re-parent in Node or Bun). On win32 there is no
+  // re-parenting at all — `readParentPidViaLivenessProbe` instead
+  // signal-0-probes the captured PPID and reports -1 once it dies, so
+  // the same `current !== initialParentPid` comparison below fires on
+  // parent death on every platform.
   //
   // We capture the initial parent PID once at install time and fire on
   // ANY change, not just reparent-to-PID-1. The PR-#676 author's original
@@ -256,17 +263,18 @@ function installStdioLifecycle(
   // the interval from blocking other exit paths.
   //
   // A one-shot startup probe (D2-revisited per codex finding #4) verifies
-  // that the underlying mechanism (`spawnSync('ps')`) actually works on
-  // this host. Stripped containers / busybox-without-procps environments
+  // that the underlying mechanism (`spawnSync('ps')` on POSIX, a
+  // `process.kill(pid, 0)` self-probe on win32) actually works on this
+  // host. Stripped containers / busybox-without-procps environments
   // would silently fall back to the cached `process.ppid` on every tick
   // — the watchdog claims to be installed but never fires. When the probe
-  // fails, we skip installing the interval entirely and log loudly so the
-  // operator sees the degraded mode instead of a phantom watchdog.
+  // fails, we skip installing the interval entirely and log the degraded
+  // mode so the operator sees it instead of a phantom watchdog.
   const initialParentPid = deps.getParentPid();
   if (initialParentPid !== 1) {
     if (!deps.probeWatchdog()) {
       deps.log(
-        '[gbrain serve] watchdog disabled: ps unavailable, parent-death detection unavailable — child will rely on stdin EOF / signals only',
+        '[gbrain serve] parent-death watchdog not available on this host; shutdown relies on stdin EOF / signals (normal and sufficient for most MCP hosts, which close stdin on exit)',
       );
     } else {
       parentWatchdog = deps.setInterval(() => {
@@ -336,6 +344,57 @@ function readLiveParentPid(): number {
     /* fall through */
   }
   return process.ppid;
+}
+
+/**
+ * win32 variant of the parent-liveness check. Windows never re-parents an
+ * orphaned process — a dead parent leaves `process.ppid` pointing at a dead
+ * PID forever — so the POSIX strategy (detect a PPID *change* via `ps`)
+ * cannot work, and `ps` usually isn't installed anyway. Instead we
+ * signal-0-probe the captured PPID: `process.kill(ppid, 0)` checks
+ * liveness without delivering a signal and without spawning a process
+ * (supported by Bun on Windows). Returns the ppid while the parent is
+ * alive and -1 once it's dead, so the watchdog's
+ * `current !== initialParentPid` comparison fires on parent death.
+ *
+ * EPERM means "exists but inaccessible" — treated as alive. PID reuse
+ * fails OPEN: if the dead parent's PID is recycled we keep reporting
+ * alive, which is no worse than having no watchdog at all — stdin EOF /
+ * signals still cover shutdown.
+ */
+export function readParentPidViaLivenessProbe(): number {
+  const ppid = process.ppid;
+  if (!Number.isInteger(ppid) || ppid <= 0) return ppid;
+  try {
+    process.kill(ppid, 0);
+    return ppid;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code === 'EPERM') return ppid;
+    return -1;
+  }
+}
+
+/** Platform-routed default for the `getParentPid` seam. */
+function defaultGetParentPid(): number {
+  return process.platform === 'win32' ? readParentPidViaLivenessProbe() : readLiveParentPid();
+}
+
+/**
+ * Platform-routed default for the `probeWatchdog` seam. win32 self-probes
+ * `process.kill(process.pid, 0)` — confirms the signal-0 mechanism the
+ * liveness probe relies on works on this runtime, without spawning
+ * anything; POSIX keeps the one-shot `ps` probe.
+ */
+function defaultProbeWatchdog(): boolean {
+  if (process.platform === 'win32') {
+    try {
+      process.kill(process.pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return probeWatchdogAvailable();
 }
 
 /**

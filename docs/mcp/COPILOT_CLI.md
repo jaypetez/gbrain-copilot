@@ -109,13 +109,25 @@ search for [any topic in your brain]
 
 You should see results from your GBrain knowledge base.
 
-> **`list_skills` returns nothing?** Skill discovery is gated by
-> `mcp.publish_skills` on the host. New brains from `gbrain init` default it
-> ON; brains upgraded from an older release stay OFF until you opt in:
-> `gbrain config set mcp.publish_skills true`. The core tools (search, query,
-> get_page, put_page, think, find_experts) work regardless. Note: `capture`
-> is a CLI-only command, not an MCP tool — the agent writes over MCP with
-> `put_page`.
+> **`list_skills` errors or returns nothing?** Two config keys gate skill
+> discovery, in order:
+>
+> 1. `permission_denied` ("Skill publishing is disabled") → enable the
+>    publish gate: `gbrain config set mcp.publish_skills true`. New brains
+>    from `gbrain init` default it ON; brains upgraded from an older release
+>    stay OFF until you opt in.
+> 2. `storage_error` ("No skills directory found") → autodetect found no
+>    skills dir on the host; set it explicitly:
+>    `gbrain config set mcp.skills_dir <path>` (or `$GBRAIN_SKILLS_DIR`).
+>    Plugin installs ship the skills at
+>    `$env:USERPROFILE\.copilot\installed-plugins\_direct\jaypetez--gbrain-copilot\skills`
+>    (PowerShell) or
+>    `~/.copilot/installed-plugins/_direct/jaypetez--gbrain-copilot/skills`
+>    (macOS/Linux).
+>
+> The core tools (search, query, get_page, put_page, think, find_experts)
+> work regardless of either key. Note: `capture` is a CLI-only command, not
+> an MCP tool — the agent writes over MCP with `put_page`.
 
 ## Skills and the custom agent
 

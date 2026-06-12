@@ -88,8 +88,19 @@ duplicate skill names.
 - **`/mcp` shows gbrain failed to start** → the gbrain CLI is not on PATH or
   the brain is not initialized. Run the installer script above, then check
   `gbrain --version` and `gbrain doctor`.
-- **`list_skills` errors over MCP** → enable skill publishing on the host:
-  `gbrain config set mcp.publish_skills true`. Core tools work regardless.
+- **`list_skills` errors over MCP** → two config keys gate it, in order:
+  1. `permission_denied` ("Skill publishing is disabled") → enable the
+     publish gate: `gbrain config set mcp.publish_skills true`.
+  2. `storage_error` ("No skills directory found") → autodetect found no
+     skills dir on the host; point it at one:
+     `gbrain config set mcp.skills_dir <path>` (or `$GBRAIN_SKILLS_DIR`).
+     Plugin installs ship the skills at
+     `$env:USERPROFILE\.copilot\installed-plugins\_direct\jaypetez--gbrain-copilot\skills`
+     (PowerShell) /
+     `~/.copilot/installed-plugins/_direct/jaypetez--gbrain-copilot/skills`
+     (macOS/Linux).
+
+  Core tools work regardless of either key.
 - **Tool permission prompts** → pre-approve with
   `copilot --allow-tool 'gbrain'` (or edit `~/.copilot/permissions-config.json`).
 - **Anything else** → `gbrain doctor --json` names the failing check and the
