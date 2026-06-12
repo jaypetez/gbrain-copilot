@@ -5334,9 +5334,10 @@ built-in registry covering the most common chat-export shapes on Earth, plus an
 opt-in LLM fallback for the long tail. The dream cycle picks the right parser
 per page automatically — no config, no waiting for the next release.
 
-The same wave introduces a new `progressive-batch` primitive (Wintermute-inspired
-ramp-up: trial 10 → 100 → 500 → full with verification at each stage) so future
-batch operations get the discipline for free instead of each reinventing it.
+The same wave introduces a new `progressive-batch` primitive (a ramp-up inspired
+by a production OpenClaw deployment: trial 10 → 100 → 500 → full with
+verification at each stage) so future batch operations get the discipline for
+free instead of each reinventing it.
 
 ### How to use it
 
@@ -7524,7 +7525,7 @@ No action required — this is a docs-only release. The wave commitments below l
 Five items duplicate older entries lower in TODOS.md (`.sql` indexing, Magika, doc_comment, CJK items) — duplication noted inline. The new top section is the canonical wave-commitment register; historical entries stay as detail.
 ## [0.40.7.0] - 2026-05-23
 
-**Your agents can now author your brain's schema pack themselves — no more shell-out, no more hand-editing YAML.** If you've ever opened `gbrain` and noticed thousands of pages stuck as untyped "notes" under `meetings/` or `research/`, this release closes that loop. Tell Wintermute (or any agent connected via MCP) "my brain has 4000 untyped meetings pages — add a `meeting` type and backfill them," and it does the whole thing safely: locks the pack file so two agents can't race, validates the change won't create dangling references, writes atomically so a crash never leaves the pack half-written, audits the mutation with the agent's identity, then updates every matching page in 1000-row batches that never wedge concurrent writers. The cathedral that was bundled but unreachable in v0.39 is now reachable from the outside.
+**Your agents can now author your brain's schema pack themselves — no more shell-out, no more hand-editing YAML.** If you've ever opened `gbrain` and noticed thousands of pages stuck as untyped "notes" under `meetings/` or `research/`, this release closes that loop. Tell your OpenClaw (or any agent connected via MCP) "my brain has 4000 untyped meetings pages — add a `meeting` type and backfill them," and it does the whole thing safely: locks the pack file so two agents can't race, validates the change won't create dangling references, writes atomically so a crash never leaves the pack half-written, audits the mutation with the agent's identity, then updates every matching page in 1000-row batches that never wedge concurrent writers. The cathedral that was bundled but unreachable in v0.39 is now reachable from the outside.
 
 This release rebuilds the design from a closed community PR ([#1321](https://github.com/garrytan/gbrain/pull/1321)) by `@garrytan-agents` into a production-grade `gbrain schema` cathedral. The four mutation verbs that PR proposed (`add-type`, `remove-type`, `stats`, `sync`) all ship — hardened with atomic+locked+audited writes, pack-aware fallback semantics that fail loud instead of silently re-introducing types you removed, and a batched MCP op (`schema_apply_mutations`) that lets a remote agent compose multi-step refactors as one atomic transaction. The lint surface grew from 2 rules to 11. The graph visualization renders link verbs. And the agent on-ramp story — RESOLVER routing, a `schema-author` skill with explicit boundary callouts to `brain-taxonomist` and `eiirp`, a `conventions/schema-evolution.md` decision tree for "when to add a type vs alias vs prefix" — means agents will actually FIND this surface instead of inventing their own ad-hoc YAML edits.
 
@@ -7549,8 +7550,8 @@ gbrain schema sync --apply     # backfills page.type on matching pages
 gbrain whoknows "machine learning"   # researcher-typed pages now route through expert routing
 
 # 4. If you run `gbrain serve --http` for remote MCP, register a client
-#    with admin scope so Wintermute or any other agent can author packs remotely:
-gbrain auth register-client wintermute --scopes admin
+#    with admin scope so your OpenClaw or any other agent can author packs remotely:
+gbrain auth register-client your-openclaw --scopes admin
 ```
 
 If any step fails or numbers look wrong, please file an issue with the output of `gbrain doctor` and `tail -20 ~/.gbrain/audit/schema-mutations-*.jsonl` so we can debug the mutation chain.
@@ -7578,7 +7579,7 @@ If any step fails or numbers look wrong, please file an issue with the output of
 - `schema_graph` (read) — JSON `{nodes, edges}` derived from link types and frontmatter_links.
 - `schema_explain_type` (read) — resolved settings for one declared type.
 - `schema_review_orphans` (read) — drilldown into untyped pages.
-- `schema_apply_mutations` (admin scope, NOT localOnly) — **batched** atomic mutation op. One call applies a list of mutations (`add_type`, `add_link_type`, `set_extractable`, etc.) inside a single `withPackLock` scope. Remote agents like Wintermute can compose multi-step refactors as one transaction. Audit log records `actor: mcp:<clientId8>` per mutation.
+- `schema_apply_mutations` (admin scope, NOT localOnly) — **batched** atomic mutation op. One call applies a list of mutations (`add_type`, `add_link_type`, `set_extractable`, etc.) inside a single `withPackLock` scope. Remote agents connected over MCP can compose multi-step refactors as one transaction. Audit log records `actor: mcp:<clientId8>` per mutation.
 - `reload_schema_pack` (admin) — flush cache + extends-chain cascade.
 
 **Lint rules grew from 2 to 11:**
@@ -17248,7 +17249,7 @@ Eight more skills ship alongside book-mirror: `article-enrichment` turns raw art
 
 Three existing skills got drift-backports from the maintainer's private fork: `citation-fixer` resolves broken tweet/post references to deterministic `x.com/handle/status/id` URLs via X API; `testing` splits into skill conformance + project test-suite health with regression-aware classification (REGRESSION / STALE / FLAKE / NEW / INFRA); `cross-modal-review` adds explicit gating ("when to invoke" vs "do NOT invoke") and a `/codex review` handoff for diff review.
 
-The privacy CI guard now also blocks `/data/brain/` and `/data/.openclaw/` literals. Seven historical files are allow-listed (frozen migration files, test fixtures, env-var fallback defaults).
+The privacy CI guard now also blocks two fork-specific filesystem path literals. Seven historical files are allow-listed (frozen migration files, test fixtures, env-var fallback defaults).
 
 ### The numbers that matter
 
@@ -17259,7 +17260,7 @@ Counted against this branch's diff vs master and against the local test suite at
 | Skills shipped in `openclaw.plugin.json` | 25 | 34 | +9 |
 | New CLI commands | (existing) | `gbrain book-mirror`, `gbrain skillpack uninstall` | +2 |
 | Skills with drift-backport from upstream | 0 | 3 (citation-fixer, testing, cross-modal-review) | +3 |
-| Privacy CI guard banned-pattern coverage | 1 (fork-name literal) | 3 (+ `/data/brain/`, `/data/.openclaw/`) | +2 |
+| Privacy CI guard banned-pattern coverage | 1 (fork-name literal) | 3 (+ two fork-specific path literals) | +2 |
 | `gbrain skillpack` subcommands | 4 (list, install, diff, check) | 5 (+ uninstall) | +1 |
 | Skill-routing trust regression detector | 0 | media-ingest ↔ book-mirror routing-eval adversarial intents | +1 |
 | Filing-rule directories sanctioned | 12 | 16 (+ ideas, research, original, voice-note) | +4 |
@@ -17346,7 +17347,7 @@ No schema migration. Existing brains work unchanged.
 
 #### Added (CI guard)
 
-- **`scripts/check-privacy.sh`** extended with `BANNED_PATHS` for `/data/brain/` and `/data/.openclaw/`. 7 historical files allow-listed.
+- **`scripts/check-privacy.sh`** extended with `BANNED_PATHS` for two fork-specific filesystem path prefixes. 7 historical files allow-listed.
 
 #### Added (config schema)
 
