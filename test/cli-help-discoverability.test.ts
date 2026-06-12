@@ -60,6 +60,44 @@ describe('WARN-5 — `gbrain capture --help` reaches the detailed HELP constant'
   });
 });
 
+describe('issue #10 A6 — `gbrain help` alias', () => {
+  test('`gbrain help` prints the same usage as `gbrain --help` and exits 0', () => {
+    const viaAlias = runCli(['help']);
+    const viaFlag = runCli(['--help']);
+    expect(viaAlias.status).toBe(0);
+    expect(viaAlias.stdout).toContain('USAGE');
+    expect(viaAlias.stdout).toBe(viaFlag.stdout);
+  });
+
+  test('`gbrain help <op>` routes to the per-command help', () => {
+    const { stdout, status } = runCli(['help', 'get']);
+    expect(status).toBe(0);
+    expect(stdout).toContain('Usage: gbrain get <slug>');
+  });
+
+  test('`gbrain help <cli-only-cmd>` routes to that command help', () => {
+    const { stdout, status } = runCli(['help', 'doctor']);
+    expect(status).toBe(0);
+    expect(stdout).toContain('Usage: gbrain doctor');
+  });
+
+  test('`gbrain help <unknown>` still fails with Unknown command', () => {
+    const { stderr, status } = runCli(['help', 'no-such-command-xyz']);
+    expect(status).toBe(1);
+    expect(stderr).toContain('Unknown command: no-such-command-xyz');
+  });
+});
+
+describe('issue #10 A3 — main `gbrain --help` lists onboard/skillpack/repair-jsonb', () => {
+  test('output mentions all three commands by name', () => {
+    const { stdout, status } = runCli(['--help']);
+    expect(status).toBe(0);
+    expect(stdout).toMatch(/^\s*onboard\s/m);
+    expect(stdout).toMatch(/^\s*skillpack\s/m);
+    expect(stdout).toMatch(/^\s*repair-jsonb\s/m);
+  });
+});
+
 describe('WARN-6 — main `gbrain --help` lists capture/brainstorm/lsd', () => {
   test('output mentions all three commands by name', () => {
     const { stdout, status } = runCli(['--help']);
