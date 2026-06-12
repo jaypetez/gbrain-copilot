@@ -1861,7 +1861,13 @@ export async function checkBrainstormHealth(engine: BrainEngine): Promise<Check>
  */
 export async function checkZeEmbeddingHealth(
   engine: BrainEngine,
-  opts?: { fileCfg?: { embedding_disabled?: boolean; zeroentropy_api_key?: string } | null },
+  opts?: {
+    fileCfg?: {
+      embedding_disabled?: boolean;
+      zeroentropy_api_key?: string;
+      embedding_model?: string;
+    } | null;
+  },
 ): Promise<Check> {
   try {
     // v0.37 fix wave (Lane E.3 + CDX2-10): read from gateway, not DB.
@@ -1898,6 +1904,22 @@ export async function checkZeEmbeddingHealth(
     // File plane: zeroentropy_api_key on GBrainConfig (added by C.3).
     const fileKey = fileCfg?.zeroentropy_api_key;
     if (!envKey && !fileKey) {
+      // Fresh-empty-brain demotion (issue #5): when the file config never
+      // chose an embedding model, the ZE model seen here is only the
+      // gateway's built-in fallback — "embedding not configured yet", the
+      // same deferred-setup posture as the embedding_disabled sentinel,
+      // not a misconfiguration. Warn only when the user explicitly
+      // configured a ZeroEntropy model and its key is missing.
+      const explicitModel =
+        typeof fileCfg?.embedding_model === 'string' && fileCfg.embedding_model.trim() !== '';
+      if (!explicitModel) {
+        return {
+          name: 'ze_embedding_health',
+          status: 'ok',
+          message:
+            'No embedding provider configured yet (gateway falls back to the ZeroEntropy default) — provider key check skipped. Configure with: gbrain config set embedding_model <id> plus its API key.',
+        };
+      }
       return {
         name: 'ze_embedding_health',
         status: 'warn',

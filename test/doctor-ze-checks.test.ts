@@ -72,18 +72,40 @@ describe('checkZeEmbeddingHealth', () => {
     });
   });
 
-  test('on ZE + no key: warns with setup hint', async () => {
+  test('explicitly configured ZE + no key: warns with setup hint', async () => {
     configureGateway({
       embedding_model: 'zeroentropyai:zembed-1',
       embedding_dimensions: 1280,
       env: { ...process.env, ZEROENTROPY_API_KEY: undefined as any },
     });
     // Clear the env var for the no-key path (user's real env may have it set).
+    // fileCfg carries embedding_model: the user explicitly chose ZE, so a
+    // missing key is a real misconfiguration and must warn.
     await withEnv({ ZEROENTROPY_API_KEY: undefined }, async () => {
-      const check = await checkZeEmbeddingHealth(engine, { fileCfg: null });
+      const check = await checkZeEmbeddingHealth(engine, {
+        fileCfg: { embedding_model: 'zeroentropyai:zembed-1' },
+      });
       expect(check.status).toBe('warn');
       expect(check.message).toContain('ZEROENTROPY_API_KEY');
       expect(check.message).toContain('zeroentropy.dev');
+    });
+  });
+
+  test('ZE via gateway default only (no embedding_model in file config) + no key: ok with configure hint', async () => {
+    // Issue #5 fresh-empty-brain demotion: a brain whose config never chose
+    // an embedding model resolves the gateway's built-in ZE default. That is
+    // "embedding not configured yet" (same posture as embedding_disabled),
+    // not a misconfiguration — pinned by the doctor-cli-smoke fresh-brain
+    // exit-0 contract, which initializes exactly this config shape.
+    configureGateway({
+      embedding_model: 'zeroentropyai:zembed-1',
+      embedding_dimensions: 1280,
+      env: { ...process.env },
+    });
+    await withEnv({ ZEROENTROPY_API_KEY: undefined }, async () => {
+      const check = await checkZeEmbeddingHealth(engine, { fileCfg: null });
+      expect(check.status).toBe('ok');
+      expect(check.message).toContain('No embedding provider configured yet');
     });
   });
 
