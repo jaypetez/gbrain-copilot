@@ -124,4 +124,20 @@ describe('serve stdio round-trip E2E (local PGLite → real MCP tool calls)', ()
     // The result payload (slug / title / snippet) must mention the marker.
     expect(text).toContain(MARKER);
   }, 30_000);
+
+  test('tools/call whoami returns the stdio identity shape (no unknown_transport)', async () => {
+    // #4 regression guard: stdio MCP has no per-token auth; the transport
+    // tag must yield an identity answer instead of the unknown_transport
+    // throw (which is reserved for genuinely ambiguous remote contexts).
+    expect(connected).toBe(true);
+    const res = await client!.callTool({ name: 'whoami', arguments: {} });
+    expect((res as { isError?: boolean }).isError).toBeFalsy();
+    const id = JSON.parse(textOf(res)) as {
+      transport: string; user: string; scopes: string[];
+    };
+    expect(id.transport).toBe('stdio');
+    expect(typeof id.user).toBe('string');
+    expect(id.user.length).toBeGreaterThan(0);
+    expect(id.scopes).toEqual([]);
+  }, 30_000);
 });

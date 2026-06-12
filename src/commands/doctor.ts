@@ -1859,14 +1859,38 @@ export async function checkBrainstormHealth(engine: BrainEngine): Promise<Check>
  * `gbrain doctor` run to spend tokens. Surfaces a paste-ready fix when the
  * key is missing.
  */
-export async function checkZeEmbeddingHealth(engine: BrainEngine): Promise<Check> {
+export async function checkZeEmbeddingHealth(
+  engine: BrainEngine,
+  opts?: {
+    fileCfg?: {
+      embedding_disabled?: boolean;
+      zeroentropy_api_key?: string;
+      embedding_model?: string;
+    } | null;
+  },
+): Promise<Check> {
   try {
     // v0.37 fix wave (Lane E.3 + CDX2-10): read from gateway, not DB.
     // The file plane is canonical post-v0.37; the DB config table is
     // schema-applied metadata. Reading DB here would skip the warning
     // when the user has a fresh install with no DB config row yet.
+    //
+    // opts.fileCfg is a test seam: passing it (even null) skips the
+    // loadConfigFileOnly() read so tests stay hermetic regardless of the
+    // host machine's real ~/.gbrain/config.json.
     const { getEmbeddingModel } = await import('../core/ai/gateway.ts');
     const { loadConfigFileOnly } = await import('../core/config.ts');
+    const fileCfg = opts && 'fileCfg' in opts ? opts.fileCfg : loadConfigFileOnly();
+    // Fresh-empty-brain demotion: `gbrain init --no-embedding` writes the
+    // deferred-setup sentinel — no provider has been chosen yet, so a
+    // missing ZE key is the expected state, not a misconfiguration.
+    if (fileCfg?.embedding_disabled === true) {
+      return {
+        name: 'ze_embedding_health',
+        status: 'ok',
+        message: 'Embedding setup deferred (embedding_disabled) — provider key check skipped. Configure with: gbrain config set embedding_model <id>',
+      };
+    }
     let model = '';
     try { model = getEmbeddingModel(); } catch { /* gateway unconfigured */ }
     if (!model.startsWith('zeroentropyai:')) {
@@ -1878,8 +1902,24 @@ export async function checkZeEmbeddingHealth(engine: BrainEngine): Promise<Check
     }
     const envKey = process.env.ZEROENTROPY_API_KEY;
     // File plane: zeroentropy_api_key on GBrainConfig (added by C.3).
-    const fileKey = loadConfigFileOnly()?.zeroentropy_api_key;
+    const fileKey = fileCfg?.zeroentropy_api_key;
     if (!envKey && !fileKey) {
+      // Fresh-empty-brain demotion (issue #5): when the file config never
+      // chose an embedding model, the ZE model seen here is only the
+      // gateway's built-in fallback — "embedding not configured yet", the
+      // same deferred-setup posture as the embedding_disabled sentinel,
+      // not a misconfiguration. Warn only when the user explicitly
+      // configured a ZeroEntropy model and its key is missing.
+      const explicitModel =
+        typeof fileCfg?.embedding_model === 'string' && fileCfg.embedding_model.trim() !== '';
+      if (!explicitModel) {
+        return {
+          name: 'ze_embedding_health',
+          status: 'ok',
+          message:
+            'No embedding provider configured yet (gateway falls back to the ZeroEntropy default) — provider key check skipped. Configure with: gbrain config set embedding_model <id> plus its API key.',
+        };
+      }
       return {
         name: 'ze_embedding_health',
         status: 'warn',
@@ -4923,15 +4963,28 @@ export async function buildChecks(
   // 4. pgvector extension
   progress.heartbeat('pgvector');
   try {
-    const sql = db.getConnection();
-    const ext = await sql`SELECT extname FROM pg_extension WHERE extname = 'vector'`;
+    // engine.executeRaw (NOT db.getConnection() — that's the postgres
+    // singleton, never connected on the default PGLite engine, so this
+    // check used to throw and surface a false "Could not check" warn).
+    const ext = await engine.executeRaw<{ extname: string }>(
+      `SELECT extname FROM pg_extension WHERE extname = 'vector'`,
+    );
     if (ext.length > 0) {
       checks.push({ name: 'pgvector', status: 'ok', message: 'Extension installed' });
+    } else if (engine.kind === 'pglite') {
+      // PGLite bundles pgvector (loaded at engine init + CREATE EXTENSION in
+      // the schema bootstrap) — absence means the schema never initialized.
+      checks.push({
+        name: 'pgvector',
+        status: 'fail',
+        message: 'Extension not found. PGLite bundles pgvector, so this means a broken init. Re-run: gbrain init --migrate-only',
+      });
     } else {
       checks.push({ name: 'pgvector', status: 'fail', message: 'Extension not found. Run: CREATE EXTENSION vector;' });
     }
-  } catch {
-    checks.push({ name: 'pgvector', status: 'warn', message: 'Could not check pgvector extension' });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    checks.push({ name: 'pgvector', status: 'warn', message: `Could not check pgvector extension: ${msg}` });
   }
 
   // 4b. PgBouncer / prepared-statement compatibility.
@@ -5161,7 +5214,11 @@ export async function buildChecks(
   try {
     const health = await engine.getHealth();
     const pct = (health.embed_coverage * 100).toFixed(0);
-    if (health.embed_coverage >= 0.9) {
+    if (health.page_count === 0) {
+      // Fresh-empty-brain demotion: 0% coverage with nothing imported is
+      // vacuous, not a defect — warning here is pure noise on pristine installs.
+      checks.push({ name: 'embeddings', status: 'ok', message: 'No content yet (0 pages) — embedding coverage is vacuous until the first import' });
+    } else if (health.embed_coverage >= 0.9) {
       checks.push({ name: 'embeddings', status: 'ok', message: `${pct}% coverage, ${health.missing_embeddings} missing` });
     } else if (health.embed_coverage > 0) {
       checks.push({ name: 'embeddings', status: 'warn', message: `${pct}% coverage, ${health.missing_embeddings} missing. Run: gbrain embed --stale` });
@@ -5692,7 +5749,9 @@ export async function buildChecks(
   // repair target, per #254/Codex review).
   progress.heartbeat('jsonb_integrity');
   try {
-    const sql = db.getConnection();
+    // engine.executeRaw (NOT db.getConnection() — the postgres singleton is
+    // never connected on the default PGLite engine; the old path threw and
+    // surfaced a false "Could not check" warn).
     const targets: Array<{ table: string; col: string; expected: 'object' | 'array' }> = [
       { table: 'pages',         col: 'frontmatter',    expected: 'object' },
       { table: 'raw_data',      col: 'data',           expected: 'object' },
@@ -5702,25 +5761,34 @@ export async function buildChecks(
     ];
     let totalBad = 0;
     const breakdown: string[] = [];
+    const skipped: string[] = [];
     for (const { table, col } of targets) {
       progress.heartbeat(`jsonb_integrity.${table}.${col}`);
-      const rows = await sql.unsafe(
-        `SELECT count(*)::int AS n FROM ${table} WHERE jsonb_typeof(${col}) = 'string'`,
-      );
-      const n = Number((rows as any)[0]?.n ?? 0);
-      if (n > 0) { totalBad += n; breakdown.push(`${table}.${col}=${n}`); }
+      try {
+        const rows = await engine.executeRaw<{ n: string | number }>(
+          `SELECT count(*)::int AS n FROM ${table} WHERE jsonb_typeof(${col}) = 'string'`,
+        );
+        const n = Number(rows[0]?.n ?? 0);
+        if (n > 0) { totalBad += n; breakdown.push(`${table}.${col}=${n}`); }
+      } catch {
+        // Per-target catch: a missing table/column on an older schema skips
+        // that target with a note instead of blanket-failing all 5.
+        skipped.push(`${table}.${col}`);
+      }
     }
+    const skipNote = skipped.length > 0 ? ` (skipped missing target(s): ${skipped.join(', ')})` : '';
     if (totalBad === 0) {
-      checks.push({ name: 'jsonb_integrity', status: 'ok', message: 'All JSONB columns store objects/arrays' });
+      checks.push({ name: 'jsonb_integrity', status: 'ok', message: `All JSONB columns store objects/arrays${skipNote}` });
     } else {
       checks.push({
         name: 'jsonb_integrity',
         status: 'warn',
-        message: `${totalBad} row(s) double-encoded (${breakdown.join(', ')}). Fix: gbrain repair-jsonb`,
+        message: `${totalBad} row(s) double-encoded (${breakdown.join(', ')}). Fix: gbrain repair-jsonb${skipNote}`,
       });
     }
-  } catch {
-    checks.push({ name: 'jsonb_integrity', status: 'warn', message: 'Could not check JSONB integrity' });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    checks.push({ name: 'jsonb_integrity', status: 'warn', message: `Could not check JSONB integrity: ${msg}` });
   }
 
   // 10b. Takes weight grid integrity (v0.32 — EXP-2).
@@ -7039,7 +7107,8 @@ export async function runDoctor(
   }
 
   const checks = await buildChecks(engine, args, dbSource);
-  const hasFail = outputResults(checks, jsonOutput);
+  const report = outputResults(checks, jsonOutput);
+  const hasFail = report.status === 'unhealthy';
 
   // Features teaser (non-JSON, non-failing only)
   if (!jsonOutput && !hasFail && engine) {
@@ -7050,7 +7119,10 @@ export async function runDoctor(
     } catch { /* best-effort */ }
   }
 
-  process.exit(hasFail ? 1 : 0);
+  // Exit-code contract (issue #5): 0 = healthy, 1 = warnings, 2 = failures.
+  // Pre-change behavior was 0/0/1 — warnings were indistinguishable from
+  // healthy, and failures looked like generic CLI errors.
+  process.exit(computeExitCode(report));
 }
 
 // ---------------------------------------------------------------------------
@@ -7272,9 +7344,11 @@ export function skillBrainFirstCheck(skillsDir: string): Check {
   };
 }
 
-function outputResults(checks: Check[], json: boolean): boolean {
+function outputResults(checks: Check[], json: boolean): DoctorReport {
   // v0.41.19.0 — render goes through computeDoctorReport so the human
   // output, JSON output, and remote MCP envelope all share one shape.
+  // Returns the computed report so the caller (runDoctor) derives the
+  // exit code from the same aggregation the render used.
   const report = computeDoctorReport(checks);
   const hasFail = report.status === 'unhealthy';
   const hasWarn = report.status === 'warnings';
@@ -7282,7 +7356,7 @@ function outputResults(checks: Check[], json: boolean): boolean {
 
   if (json) {
     console.log(JSON.stringify(report));
-    return hasFail;
+    return report;
   }
 
   console.log('\nGBrain Health Check');
@@ -7342,7 +7416,23 @@ function outputResults(checks: Check[], json: boolean): boolean {
   } else {
     console.log(`Overall health score: ${score}/100. All checks passed.`);
   }
-  return hasFail;
+  return report;
+}
+
+/**
+ * Map a doctor report to the CLI exit code:
+ *   0 — healthy (every check ok)
+ *   1 — warnings (at least one warn, no fails)
+ *   2 — failures (at least one fail)
+ *
+ * Pure + exported so scripts and tests can pin the contract without
+ * spawning the CLI. The skills docs (testing / maintain /
+ * using-gbrain-with-copilot) document the same triple.
+ */
+export function computeExitCode(report: Pick<DoctorReport, 'status'>): 0 | 1 | 2 {
+  if (report.status === 'unhealthy') return 2;
+  if (report.status === 'warnings') return 1;
+  return 0;
 }
 
 /**

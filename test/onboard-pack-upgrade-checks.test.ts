@@ -56,9 +56,12 @@ describe('checkPackUpgradeAvailable', () => {
   it('fires on gbrain-base brain with gbrain-base-v2 available', async () => {
     // Default active pack is gbrain-base; gbrain-base-v2 declares
     // migration_from: {pack: gbrain-base, version: "1.x"}.
+    // Issue #5 fresh-brain noise fix: an available successor is an opt-in
+    // upgrade nudge, so status is ok — the hint message + manual_only
+    // remediation are the signal, not the status.
     const result = await checkPackUpgradeAvailable(engine);
     expect(result.check.name).toBe('pack_upgrade_available');
-    expect(result.check.status).toBe('warn');
+    expect(result.check.status).toBe('ok');
     expect(result.check.message).toContain('gbrain-base-v2');
     expect(result.remediations.length).toBe(1);
     expect(result.remediations[0].job).toBe('unify-types');

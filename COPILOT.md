@@ -31,11 +31,17 @@ curl -fsSL https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/script
 ```
 
 **2. Install the plugin** (ships the skills + the gbrain agent + the MCP
-server entry in one step). Inside `copilot`:
+server entry). Inside `copilot`:
 
 ```
-/plugin install jaypetez/gbrain-copilot
+/plugin marketplace add jaypetez/gbrain-copilot
+/plugin install gbrain@gbrain-copilot
 ```
+
+(From a terminal: `copilot plugin marketplace add jaypetez/gbrain-copilot`,
+then `copilot plugin install gbrain@gbrain-copilot`. Older Copilot CLI
+versions can still use `/plugin install jaypetez/gbrain-copilot`, but it
+prints a deprecation warning and installs the whole repo.)
 
 **3. Verify.** `/mcp` should list `gbrain` as running. Then try:
 
@@ -52,8 +58,9 @@ gbrain init --pglite          # 2-second local brain, no server
 gbrain doctor                 # verify health
 ```
 
-Then wire the MCP server using any one of: `/plugin install
-jaypetez/gbrain-copilot`, the interactive `/mcp add` form, or by merging
+Then wire the MCP server using any one of: the plugin (`/plugin marketplace
+add jaypetez/gbrain-copilot` + `/plugin install gbrain@gbrain-copilot`),
+the interactive `/mcp add` form, or by merging
 this into `~/.copilot/mcp-config.json` (or `$COPILOT_HOME/mcp-config.json`):
 
 ```json
@@ -83,13 +90,29 @@ cycle): [`INSTALL_FOR_AGENTS.md`](INSTALL_FOR_AGENTS.md).
 Pick ONE skills path (plugin OR manual copy) — installing both produces
 duplicate skill names.
 
+Manifest note: `plugin.json` (and the generated `plugins/gbrain/plugin.json`
+payload manifest, built by `scripts/build-copilot-plugin.sh`) are the Copilot
+CLI manifests; `openclaw.plugin.json` is the upstream OpenClaw manifest,
+unused by Copilot CLI and intentionally not version-synced.
+
 ## Troubleshooting
 
 - **`/mcp` shows gbrain failed to start** → the gbrain CLI is not on PATH or
   the brain is not initialized. Run the installer script above, then check
   `gbrain --version` and `gbrain doctor`.
-- **`list_skills` errors over MCP** → enable skill publishing on the host:
-  `gbrain config set mcp.publish_skills true`. Core tools work regardless.
+- **`list_skills` errors over MCP** → two config keys gate it, in order:
+  1. `permission_denied` ("Skill publishing is disabled") → enable the
+     publish gate: `gbrain config set mcp.publish_skills true`.
+  2. `storage_error` ("No skills directory found") → autodetect found no
+     skills dir on the host; point it at one:
+     `gbrain config set mcp.skills_dir <path>` (or `$GBRAIN_SKILLS_DIR`).
+     Plugin installs ship the skills at
+     `$env:USERPROFILE\.copilot\installed-plugins\_direct\jaypetez--gbrain-copilot\skills`
+     (PowerShell) /
+     `~/.copilot/installed-plugins/_direct/jaypetez--gbrain-copilot/skills`
+     (macOS/Linux).
+
+  Core tools work regardless of either key.
 - **Tool permission prompts** → pre-approve with
   `copilot --allow-tool 'gbrain'` (or edit `~/.copilot/permissions-config.json`).
 - **Anything else** → `gbrain doctor --json` names the failing check and the

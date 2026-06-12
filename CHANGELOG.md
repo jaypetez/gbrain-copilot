@@ -2,6 +2,58 @@
 
 All notable changes to GBrain will be documented in this file.
 
+## [0.42.39.0] - 2026-06-11
+
+**The first outside install audit filed 10 issues against this fork. This release fixes all of them: the Copilot plugin installs from a marketplace at about 1 MB instead of copying the whole 87 MB dev repo, `gbrain doctor` scores a fresh brain 100 instead of 70, unattended installs actually work without API keys, and the MCP identity tool stops erroring on every default setup.**
+
+A first-time user installed this fork on Windows, stress-tested everything from the install script to the MCP server, and filed ten detailed issues (#1 through #10). Thank you @aviraldua93, this was real work and every finding was reproducible. The fixes land in one wave.
+
+The headline numbers:
+
+| What | Before | After |
+|---|---|---|
+| Copilot plugin install | 87.73 MB, 2,513 files, whole dev repo | ~1.0 MB, 131 files, skills + agent only |
+| Contributor docs auto-loading into Copilot sessions | ~50 KB every session | none (they no longer ship in the plugin) |
+| Fresh-brain `gbrain doctor` | score 70, ~67 lines of noise, 7 internal breadcrumbs | score 100, 3 progress lines, clean report |
+| `whoami` over MCP | always returned `unknown_transport` | returns your OS identity |
+| `install-copilot -Yes` with no API keys | green banner, broken install, exit 0 | working keyword-search brain, or an honest PARTIAL INSTALL with exit 1 |
+| Failed commands on PGLite | exited 0 (a runtime quirk ate the exit code) | exit 1 |
+
+**New install flow.** The plugin now installs from a marketplace, which is the path GitHub Copilot CLI supports going forward (direct repo installs print a deprecation warning):
+
+```
+copilot plugin marketplace add jaypetez/gbrain-copilot
+copilot plugin install gbrain@gbrain-copilot
+```
+
+Existing plugin users: reinstall via the two commands above to drop from 87 MB to 1 MB and stop the contributor instructions from loading into your sessions.
+
+**Things to watch after upgrading:**
+
+- `gbrain doctor` now exits 0 = healthy, 1 = warnings, 2 = failures. Scripts that chained `gbrain doctor && next-step` will now stop on warnings, which is the point, but check your automation.
+- Commands that fail on a PGLite brain now exit 1. They always should have; a PGLite runtime quirk was resetting the exit code to 0 after the error printed.
+- Bulk commands (doctor, sync, embed, import...) now print at most one progress heartbeat line per second in non-TTY mode instead of one per item. `--progress-json` still emits every event.
+
+### Added
+- **Marketplace manifest + thin plugin payload.** `.github/plugin/marketplace.json` points Copilot CLI at a generated `plugins/gbrain/` directory (skills, the gbrain agent, plugin manifest, nothing else). `scripts/build-copilot-plugin.sh` regenerates it; a new `check:fork-hygiene` gate in `bun run verify` fails the build if the payload drifts from `skills/`, if any manifest version drifts from `VERSION`, or if a stale upstream URL sneaks into published docs. (#2, #3, #8, #9)
+- **`whoami` works over local MCP.** The stdio transport now tags requests so `whoami` can answer with your OS user, source, and takes visibility. The security posture is unchanged: stdio callers stay on the untrusted-remote path for filesystem confinement, and the `unknown_transport` error still fires for genuinely misconfigured remote transports. (#4)
+- **Windows parent-death watchdog.** `gbrain serve` on Windows now detects a dead parent process directly (no `ps`, no extra processes) and shuts down cleanly, and the startup message about it is one calm line instead of a warning that reads like degraded mode. (#6)
+- **`gbrain help` works.** `gbrain help` prints usage like every other CLI, and `gbrain help <command>` routes to that command's help. Top-level `--help` now lists `onboard`, `skillpack`, and `repair-jsonb`, which existed but were invisible. (#10)
+
+### Fixed
+- **`gbrain doctor` tells the truth on PGLite.** The pgvector and JSONB integrity checks now actually run on PGLite brains (they probed a Postgres-only connection before and always failed into a warning). Checks that warn on a pristine empty brain were demoted to ok-with-hint, so a just-initialized brain scores 100. The seven `[doctor-categories] unknown check name` developer breadcrumbs are gone, and the category drift guard now scans every module that emits checks. (#5)
+- **Unattended installs.** `install-copilot.ps1 -Yes` / `install-copilot.sh --yes` no longer stall on a hidden interactive prompt, fall back to a keyword-search-only brain (with a clear warning and the one-liner to enable embeddings later) when no embedding API key is present, explain the migrations step that works around Bun blocking postinstall hooks, and gate the success banner on the health check: a broken install now prints PARTIAL INSTALL and exits 1 instead of lying green. (#1)
+- **Empty queries fail loudly.** `gbrain query ""` (and a bare `gbrain query`) exits 1 with a usage example instead of printing an error and exiting 0. The fix also unmasked a wider bug: PGLite's embedded runtime was overwriting the process exit code during engine shutdown, so every errored command on a PGLite brain exited 0. All errored commands now exit 1. (#10)
+- **`list_skills` troubleshooting matches reality.** The error messages and the Copilot docs now walk the two settings in order (`mcp.publish_skills`, then `mcp.skills_dir`, with the plugin install path as the example) instead of each pointing at a different key. (#6)
+- **Copilot docs got a first-run pass.** Prerequisites before the install commands, a deterministic three-step verification (MCP status, `get_brain_identity`, `gbrain doctor --json`) that works on an empty brain, a note that local stdio needs no token, platform-neutral example paths in the bundled skills, and the fork README now attributes the upstream author's first-person introduction as a quote. (#7)
+- **Fork hygiene.** `plugin.json` carries the full 4-segment version (it had silently dropped the micro segment), the one stale upstream raw URL in the docs bundle is rewritten to this fork, and the documentation privacy sweep now covers the changelog with the privacy CI gate enforcing it permanently. (#9, #10)
+
+### To take advantage of v0.42.39.0
+
+Existing brains: `gbrain upgrade`. No schema changes and no manual steps.
+
+Copilot CLI users: reinstall the plugin via the marketplace flow above to get the thin payload. If `gbrain doctor` exits 1 after the upgrade, that is the new warnings exit code doing its job; run `gbrain doctor --json` to see what it found.
+
 ## [0.42.38.1] - 2026-06-10
 
 **gbrain-copilot: this distribution is now a self-sufficient fork of [garrytan/gbrain](https://github.com/garrytan/gbrain) with first-class GitHub Copilot CLI support.** Install, upgrade, releases, skills, and docs all come from `jaypetez/gbrain-copilot`; nothing requires the upstream repo. All credit for GBrain itself belongs upstream — this release is the integration layer.
@@ -5334,9 +5386,10 @@ built-in registry covering the most common chat-export shapes on Earth, plus an
 opt-in LLM fallback for the long tail. The dream cycle picks the right parser
 per page automatically — no config, no waiting for the next release.
 
-The same wave introduces a new `progressive-batch` primitive (Wintermute-inspired
-ramp-up: trial 10 → 100 → 500 → full with verification at each stage) so future
-batch operations get the discipline for free instead of each reinventing it.
+The same wave introduces a new `progressive-batch` primitive (a ramp-up inspired
+by a production OpenClaw deployment: trial 10 → 100 → 500 → full with
+verification at each stage) so future batch operations get the discipline for
+free instead of each reinventing it.
 
 ### How to use it
 
@@ -7524,7 +7577,7 @@ No action required — this is a docs-only release. The wave commitments below l
 Five items duplicate older entries lower in TODOS.md (`.sql` indexing, Magika, doc_comment, CJK items) — duplication noted inline. The new top section is the canonical wave-commitment register; historical entries stay as detail.
 ## [0.40.7.0] - 2026-05-23
 
-**Your agents can now author your brain's schema pack themselves — no more shell-out, no more hand-editing YAML.** If you've ever opened `gbrain` and noticed thousands of pages stuck as untyped "notes" under `meetings/` or `research/`, this release closes that loop. Tell Wintermute (or any agent connected via MCP) "my brain has 4000 untyped meetings pages — add a `meeting` type and backfill them," and it does the whole thing safely: locks the pack file so two agents can't race, validates the change won't create dangling references, writes atomically so a crash never leaves the pack half-written, audits the mutation with the agent's identity, then updates every matching page in 1000-row batches that never wedge concurrent writers. The cathedral that was bundled but unreachable in v0.39 is now reachable from the outside.
+**Your agents can now author your brain's schema pack themselves — no more shell-out, no more hand-editing YAML.** If you've ever opened `gbrain` and noticed thousands of pages stuck as untyped "notes" under `meetings/` or `research/`, this release closes that loop. Tell your OpenClaw (or any agent connected via MCP) "my brain has 4000 untyped meetings pages — add a `meeting` type and backfill them," and it does the whole thing safely: locks the pack file so two agents can't race, validates the change won't create dangling references, writes atomically so a crash never leaves the pack half-written, audits the mutation with the agent's identity, then updates every matching page in 1000-row batches that never wedge concurrent writers. The cathedral that was bundled but unreachable in v0.39 is now reachable from the outside.
 
 This release rebuilds the design from a closed community PR ([#1321](https://github.com/garrytan/gbrain/pull/1321)) by `@garrytan-agents` into a production-grade `gbrain schema` cathedral. The four mutation verbs that PR proposed (`add-type`, `remove-type`, `stats`, `sync`) all ship — hardened with atomic+locked+audited writes, pack-aware fallback semantics that fail loud instead of silently re-introducing types you removed, and a batched MCP op (`schema_apply_mutations`) that lets a remote agent compose multi-step refactors as one atomic transaction. The lint surface grew from 2 rules to 11. The graph visualization renders link verbs. And the agent on-ramp story — RESOLVER routing, a `schema-author` skill with explicit boundary callouts to `brain-taxonomist` and `eiirp`, a `conventions/schema-evolution.md` decision tree for "when to add a type vs alias vs prefix" — means agents will actually FIND this surface instead of inventing their own ad-hoc YAML edits.
 
@@ -7549,8 +7602,8 @@ gbrain schema sync --apply     # backfills page.type on matching pages
 gbrain whoknows "machine learning"   # researcher-typed pages now route through expert routing
 
 # 4. If you run `gbrain serve --http` for remote MCP, register a client
-#    with admin scope so Wintermute or any other agent can author packs remotely:
-gbrain auth register-client wintermute --scopes admin
+#    with admin scope so your OpenClaw or any other agent can author packs remotely:
+gbrain auth register-client your-openclaw --scopes admin
 ```
 
 If any step fails or numbers look wrong, please file an issue with the output of `gbrain doctor` and `tail -20 ~/.gbrain/audit/schema-mutations-*.jsonl` so we can debug the mutation chain.
@@ -7578,7 +7631,7 @@ If any step fails or numbers look wrong, please file an issue with the output of
 - `schema_graph` (read) — JSON `{nodes, edges}` derived from link types and frontmatter_links.
 - `schema_explain_type` (read) — resolved settings for one declared type.
 - `schema_review_orphans` (read) — drilldown into untyped pages.
-- `schema_apply_mutations` (admin scope, NOT localOnly) — **batched** atomic mutation op. One call applies a list of mutations (`add_type`, `add_link_type`, `set_extractable`, etc.) inside a single `withPackLock` scope. Remote agents like Wintermute can compose multi-step refactors as one transaction. Audit log records `actor: mcp:<clientId8>` per mutation.
+- `schema_apply_mutations` (admin scope, NOT localOnly) — **batched** atomic mutation op. One call applies a list of mutations (`add_type`, `add_link_type`, `set_extractable`, etc.) inside a single `withPackLock` scope. Remote agents connected over MCP can compose multi-step refactors as one transaction. Audit log records `actor: mcp:<clientId8>` per mutation.
 - `reload_schema_pack` (admin) — flush cache + extends-chain cascade.
 
 **Lint rules grew from 2 to 11:**
@@ -17248,7 +17301,7 @@ Eight more skills ship alongside book-mirror: `article-enrichment` turns raw art
 
 Three existing skills got drift-backports from the maintainer's private fork: `citation-fixer` resolves broken tweet/post references to deterministic `x.com/handle/status/id` URLs via X API; `testing` splits into skill conformance + project test-suite health with regression-aware classification (REGRESSION / STALE / FLAKE / NEW / INFRA); `cross-modal-review` adds explicit gating ("when to invoke" vs "do NOT invoke") and a `/codex review` handoff for diff review.
 
-The privacy CI guard now also blocks `/data/brain/` and `/data/.openclaw/` literals. Seven historical files are allow-listed (frozen migration files, test fixtures, env-var fallback defaults).
+The privacy CI guard now also blocks two fork-specific filesystem path literals. Seven historical files are allow-listed (frozen migration files, test fixtures, env-var fallback defaults).
 
 ### The numbers that matter
 
@@ -17259,7 +17312,7 @@ Counted against this branch's diff vs master and against the local test suite at
 | Skills shipped in `openclaw.plugin.json` | 25 | 34 | +9 |
 | New CLI commands | (existing) | `gbrain book-mirror`, `gbrain skillpack uninstall` | +2 |
 | Skills with drift-backport from upstream | 0 | 3 (citation-fixer, testing, cross-modal-review) | +3 |
-| Privacy CI guard banned-pattern coverage | 1 (fork-name literal) | 3 (+ `/data/brain/`, `/data/.openclaw/`) | +2 |
+| Privacy CI guard banned-pattern coverage | 1 (fork-name literal) | 3 (+ two fork-specific path literals) | +2 |
 | `gbrain skillpack` subcommands | 4 (list, install, diff, check) | 5 (+ uninstall) | +1 |
 | Skill-routing trust regression detector | 0 | media-ingest ↔ book-mirror routing-eval adversarial intents | +1 |
 | Filing-rule directories sanctioned | 12 | 16 (+ ideas, research, original, voice-note) | +4 |
@@ -17346,7 +17399,7 @@ No schema migration. Existing brains work unchanged.
 
 #### Added (CI guard)
 
-- **`scripts/check-privacy.sh`** extended with `BANNED_PATHS` for `/data/brain/` and `/data/.openclaw/`. 7 historical files allow-listed.
+- **`scripts/check-privacy.sh`** extended with `BANNED_PATHS` for two fork-specific filesystem path prefixes. 7 historical files allow-listed.
 
 #### Added (config schema)
 

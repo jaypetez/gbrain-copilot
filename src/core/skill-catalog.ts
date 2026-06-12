@@ -203,7 +203,10 @@ export function resolveSkillsDir(
     throw new OperationError(
       'storage_error',
       'No skills directory found on the server host.',
-      `Set it explicitly: \`gbrain config set mcp.skills_dir <path>\` (or $GBRAIN_SKILLS_DIR). Search order:\n${hint}`,
+      'Two config keys gate skills over MCP, in gate order: ' +
+        '1) `gbrain config set mcp.publish_skills true` (publish gate — already enabled if you saw this error from a remote client); ' +
+        '2) `gbrain config set mcp.skills_dir <path>` (or $GBRAIN_SKILLS_DIR) — no directory was found by autodetect. ' +
+        `Search order:\n${hint}`,
     );
   }
   return { dir: det.dir, source: det.source };
@@ -570,6 +573,7 @@ export function assertPublishEnabled(ctx: OperationContext, publishSkills: boole
   throw new OperationError(
     'permission_denied',
     'Skill publishing is disabled by the brain owner.',
-    'The owner can enable it with `gbrain config set mcp.publish_skills true`.',
+    'The owner can enable it with `gbrain config set mcp.publish_skills true`. ' +
+      'If skills still do not appear afterward, also set `gbrain config set mcp.skills_dir <path>`.',
   );
 }

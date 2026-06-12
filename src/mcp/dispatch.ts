@@ -70,6 +70,12 @@ export interface DispatchOpts {
    * was replaced by dispatchToolCall.
    */
   auth?: AuthInfo;
+  /**
+   * Transport identity tag for whoami. Set ONLY by the stdio MCP transport
+   * (src/mcp/server.ts). NOT a trust signal — `remote` stays true and every
+   * ctx.remote / ctx.auth security gate behaves as if this were absent.
+   */
+  transport?: 'stdio';
 }
 
 /**
@@ -210,6 +216,7 @@ export function buildOperationContext(
     // this fallback covers code paths that historically passed undefined.
     sourceId: opts.sourceId ?? 'default',
     auth: opts.auth,
+    transport: opts.transport,
   };
 }
 

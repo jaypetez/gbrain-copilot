@@ -26,6 +26,7 @@ import { resetPgliteState } from './helpers/reset-pglite.ts';
 import {
   buildChecks,
   computeDoctorReport,
+  computeExitCode,
   type Check,
 } from '../src/commands/doctor.ts';
 
@@ -112,6 +113,36 @@ describe('computeDoctorReport — pure score aggregation', () => {
     const r = computeDoctorReport(many);
     expect(r.health_score).toBe(0);
     expect(r.status).toBe('unhealthy');
+  });
+});
+
+describe('computeExitCode — pure exit-code contract (0/1/2)', () => {
+  test('healthy report (all ok) → 0', () => {
+    const r = computeDoctorReport([
+      { name: 'a', status: 'ok', message: '' },
+      { name: 'b', status: 'ok', message: '' },
+    ]);
+    expect(computeExitCode(r)).toBe(0);
+  });
+
+  test('warnings report (warn, no fail) → 1', () => {
+    const r = computeDoctorReport([
+      { name: 'a', status: 'ok', message: '' },
+      { name: 'b', status: 'warn', message: '' },
+    ]);
+    expect(computeExitCode(r)).toBe(1);
+  });
+
+  test('unhealthy report (any fail) → 2, even with warns alongside', () => {
+    const r = computeDoctorReport([
+      { name: 'a', status: 'warn', message: '' },
+      { name: 'b', status: 'fail', message: '' },
+    ]);
+    expect(computeExitCode(r)).toBe(2);
+  });
+
+  test('empty check list → healthy → 0', () => {
+    expect(computeExitCode(computeDoctorReport([]))).toBe(0);
   });
 });
 

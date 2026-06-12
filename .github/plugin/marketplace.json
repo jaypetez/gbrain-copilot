@@ -1,0 +1,30 @@
+{
+  "name": "gbrain-copilot",
+  "owner": {
+    "name": "Jayson Petersen"
+  },
+  "metadata": {
+    "description": "GBrain - Garry Tan's agent brain (knowledge graph, hybrid RAG, synthesis with citations, 50+ skills) for GitHub Copilot CLI.",
+    "version": "0.42.39.0",
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "gbrain",
+      "source": "gbrain",
+      "description": "GBrain MCP server + 50+ Agent Skills + the gbrain custom agent. Requires the gbrain CLI on PATH (run scripts/install-copilot.ps1 or .sh first). Original work (c) Garry Tan, MIT.",
+      "version": "0.42.39.0",
+      "license": "MIT",
+      "homepage": "https://github.com/jaypetez/gbrain-copilot",
+      "repository": "https://github.com/jaypetez/gbrain-copilot",
+      "keywords": [
+        "knowledge-graph",
+        "rag",
+        "memory",
+        "mcp",
+        "second-brain",
+        "gbrain"
+      ]
+    }
+  ]
+}

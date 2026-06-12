@@ -210,6 +210,18 @@ async function main() {
     return;
   }
 
+  // `gbrain help` mirrors `gbrain --help`; `gbrain help <cmd>` re-dispatches
+  // as `gbrain <cmd> --help` through the existing per-command help path.
+  if (command === 'help') {
+    if (args.length === 1 || args[1] === 'help' || args[1].startsWith('-')) {
+      printHelp();
+      return;
+    }
+    command = args[1];
+    args.splice(0, 2, command);
+    if (!hasHelpFlag(args)) args.push('--help');
+  }
+
   if (command === '--version' || command === 'version') {
     console.log(`gbrain ${VERSION}`);
     return;
@@ -323,6 +335,17 @@ async function main() {
   // NOT supplied. The runtime altRequired check below overrides the
   // generic required-flag check for that op.
   const queryHasAlt = op.name === 'query' && typeof params.image === 'string' && params.image.length > 0;
+  // The `query` param is required:false (image is the alternative entry
+  // point), so a missing or blank positional sails past the required check
+  // below, reached the op handler's throw, and still exited 0. Validate at
+  // the CLI layer (the MCP layer keeps returning its structured error from
+  // the shared handler).
+  if (op.name === 'query' && !queryHasAlt
+      && (params.query === undefined
+        || (typeof params.query === 'string' && params.query.trim().length === 0))) {
+    console.error('query requires either `query` (text) or `image` (base64 bytes). Try: gbrain query "alice meeting notes"');
+    process.exit(1);
+  }
   for (const [key, def] of Object.entries(op.params)) {
     if (def.required && params[key] === undefined) {
       if (queryHasAlt && key === 'query') continue;
@@ -381,6 +404,11 @@ async function main() {
     forceExitTimer.unref?.();
   }
 
+  // Tracks the exit code the catch below sets, so the finally can re-assert
+  // it after engine.disconnect(). PGLite's bundled Emscripten runtime assigns
+  // `process.exitCode` itself (nonzero mid-run, 0 on clean WASM exit), so the
+  // ambient value can't be trusted on either side of disconnect.
+  let opErrorExitCode: number | undefined;
   try {
     const ctx = await makeContext(engine, params);
     const rawResult = await op.handler(ctx, params);
@@ -403,6 +431,7 @@ async function main() {
     } else {
       console.error(e instanceof Error ? e.message : String(e));
     }
+    opErrorExitCode = 1;
     process.exitCode = 1;
   } finally {
     // v0.42.20.0 — drain ALL fire-and-forget sinks (facts, last-retrieved,
@@ -416,6 +445,10 @@ async function main() {
     // disconnect or a lingering socket keeps Bun's loop alive.
     await drainAllBackgroundWorkForCliExit({ timeoutMs: 1000 });
     await engine.disconnect();
+    // PGLite's clean WASM exit during disconnect resets `process.exitCode`
+    // to 0, clobbering the error code the catch above set. Re-assert it so
+    // failed ops exit nonzero.
+    if (opErrorExitCode !== undefined) process.exitCode = opErrorExitCode;
     if (forceExitTimer) clearTimeout(forceExitTimer);
   }
 }
@@ -2111,7 +2144,8 @@ SETUP
   migrate --to <supabase|pglite>     Transfer brain between engines
   upgrade                            Self-update
   check-update [--json]              Check for new versions
-  doctor [--json] [--fast]            Health check (resolver, skills, pgvector, RLS, embeddings)
+  doctor [--json] [--fast]            Health check (resolver, skills, pgvector, RLS, embeddings); exit 0=healthy 1=warnings 2=failures
+  onboard [--check|--auto|--history]  Brain-health remediation plan (--auto applies fixes)
   integrations [subcommand]          Manage integration recipes (senses + reflexes)
 
 PAGES
@@ -2181,6 +2215,7 @@ TOOLS
   dream [--dry-run] [--json]         Run the overnight maintenance cycle once (cron-friendly).
                                      See also: autopilot --install (continuous daemon).
   check-resolvable [--json] [--fix]  Validate skill tree (reachability/MECE/DRY)
+  skillpack <list|scaffold|...>      Manage bundled skills (scaffold into repo, reference diffs, harvest)
   report --type <name> --content ... Save timestamped report to brain/reports/
 
 BRAIN (capture / ideate / explore — v0.37/v0.38)
@@ -2229,6 +2264,7 @@ ADMIN
   features [--json] [--auto-fix]     Scan usage + recommend unused features
   autopilot [--repo] [--interval N]  Self-maintaining brain daemon
   config [show|get|set] <key> [val]  Brain config
+  repair-jsonb [--dry-run] [--json]  Repair double-encoded JSONB rows from pre-v0.12.1 writes
   storage status [--repo <path>]     Storage tier status and health
         [--json]                     (git-tracked vs supabase-only)
   serve                              MCP server (stdio)

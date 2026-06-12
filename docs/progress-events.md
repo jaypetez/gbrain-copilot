@@ -102,7 +102,10 @@ Fields:
 
 Emitted for long-running single operations that don't iterate
 (e.g. `SELECT` against a 50K-row table). No `done`, no `total` — just a
-signal that work is still happening.
+signal that work is still happening. Non-TTY human mode coalesces
+heartbeat lines to at most one per `--progress-interval` window (default
+1000ms; the first heartbeat of a phase always prints); JSON mode emits
+every event.
 
 ```json
 {"event":"heartbeat","phase":"doctor.markdown_body_completeness","note":"scanning pages for truncation…","elapsed_ms":1000,"ts":"..."}

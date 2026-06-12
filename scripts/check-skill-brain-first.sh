@@ -3,8 +3,9 @@
 #
 # Runs `gbrain doctor --json` against this repo's own skills/ and parses
 # the JSON to assert `checks[name=skill_brain_first].status !== "warn"`.
-# Doctor's exit code only flags `fail`, not `warn`, so explicit JSON-
-# parsing is required to gate `bun run verify` on this warning-class check
+# Doctor's exit code is 0=healthy / 1=warnings / 2=failures, but a 1 only
+# says SOME check warned — explicit JSON-parsing is still required to gate
+# `bun run verify` on this specific warning-class check
 # (F15 from /plan-eng-review).
 #
 # When this fires, the brain-first compliance check found new offenders

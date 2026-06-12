@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { EventEmitter } from 'events';
-import { runServe, type ServeOptions } from '../src/commands/serve';
+import { runServe, readParentPidViaLivenessProbe, type ServeOptions } from '../src/commands/serve';
 import type { BrainEngine } from '../src/core/engine';
 
 // These tests cover the stdio lifecycle hooks added to runServe so that the
@@ -268,6 +268,25 @@ describe('runServe stdio lifecycle', () => {
     expect(h.timers.active()).toBe(0);
   });
 
+  test('parent watchdog fires when getParentPid returns -1 (win32 liveness probe: dead parent)', async () => {
+    // Windows never re-parents — `readParentPidViaLivenessProbe` reports -1
+    // once the captured PPID stops answering the signal-0 probe. The same
+    // `current !== initialParentPid` comparison must fire on that sentinel.
+    const h = makeHarness({ initialParentPid: 4242 });
+    await startInBackground(h.engine, [], h.opts);
+
+    expect(h.timers.active()).toBe(1);
+
+    h.setParentPid(-1);
+    h.timers.tickAll();
+
+    const code = await h.exited;
+    expect(code).toBe(0);
+    expect(h.engine.disconnectCalls).toBe(1);
+    expect(h.logs.some(l => l.includes('graceful exit (parent-died)'))).toBe(true);
+    expect(h.timers.active()).toBe(0);
+  });
+
   test('parent watchdog NOT installed when initial ppid is already 1 (legitimate init child)', async () => {
     // Spawned directly under PID 1 (e.g. systemd unit, Docker entrypoint):
     // ppid=1 is the documented steady state, not "parent died". We must
@@ -295,9 +314,10 @@ describe('runServe stdio lifecycle', () => {
     const h = makeHarness({ initialParentPid: 4242, probeWatchdog: false });
     await startInBackground(h.engine, [], h.opts);
 
-    // Watchdog NOT installed — message matches behavior.
+    // Watchdog NOT installed — message matches behavior (calm wording:
+    // stdin EOF / signals are normal and sufficient for most MCP hosts).
     expect(h.timers.active()).toBe(0);
-    expect(h.logs.some(l => l.includes('[gbrain serve] watchdog disabled: ps unavailable'))).toBe(true);
+    expect(h.logs.some(l => l.includes('[gbrain serve] parent-death watchdog not available on this host'))).toBe(true);
 
     // Sanity: the other lifecycle paths still work — the shutdown still
     // funnels through stdin EOF / signals, just not via the watchdog.
@@ -499,5 +519,13 @@ describe('runServe stdio lifecycle', () => {
       expect(h.engine.disconnectCalls).toBe(1);
       expect(h.logs.some(l => l.includes('graceful exit (stdin-end)'))).toBe(true);
     });
+  });
+});
+
+describe('readParentPidViaLivenessProbe', () => {
+  test('alive parent: returns process.ppid unchanged (test runner parent is alive)', () => {
+    // The test runner's own parent is alive by definition, so the signal-0
+    // probe must report the captured ppid as-is on every platform.
+    expect(readParentPidViaLivenessProbe()).toBe(process.ppid);
   });
 });

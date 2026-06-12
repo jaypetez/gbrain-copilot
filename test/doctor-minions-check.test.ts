@@ -77,8 +77,9 @@ describe('gbrain doctor — half-migrated Minions detection', () => {
 
     // Use --fast so we skip the DB section entirely (no engine configured).
     const result = run(['doctor', '--fast', '--json']);
-    // doctor exits 1 on any FAIL; that's expected here.
-    expect(result.exitCode).toBe(1);
+    // doctor exits 2 on any FAIL (issue #5 contract: 0=healthy, 1=warnings,
+    // 2=failures); that's expected here.
+    expect(result.exitCode).toBe(2);
     const checks = JSON.parse(result.stdout).checks as Array<{ name: string; status: string; message: string }>;
     const minions = checks.find(c => c.name === 'minions_migration');
     expect(minions).toBeDefined();
@@ -160,7 +161,8 @@ describe('gbrain doctor — half-migrated Minions detection', () => {
     );
 
     const result = run(['doctor', '--fast', '--json']);
-    expect(result.exitCode).toBe(1);
+    // FAIL-level check present → exit 2 (issue #5 contract).
+    expect(result.exitCode).toBe(2);
     const checks = JSON.parse(result.stdout).checks as Array<{ name: string; status: string; message: string }>;
     const minions = checks.find(c => c.name === 'minions_migration');
     expect(minions!.status).toBe('fail');
@@ -199,10 +201,12 @@ describe('gbrain doctor — half-migrated Minions detection', () => {
     if (minions) {
       expect(minions.status).not.toBe('fail');
     }
-    // Critically: the test fixture would have caused exit 1 under the old
-    // (no-override) logic because of the stale partial flag. Under the new
-    // logic, doctor exits 0 (or only warns about non-related checks).
-    expect(result.exitCode).toBe(0);
+    // Critically: the stale partial flag would have produced a FAIL-level
+    // exit under the old (no-override) logic. Under the override, no check
+    // FAILs, so the exit code is never 2 (issue #5 contract: 2 = failures).
+    // It may still be 1: --fast skips DB checks with a warn-level
+    // `connection` entry, and warnings now exit 1 instead of 0.
+    expect(result.exitCode).not.toBe(2);
   });
 
   test('filesystem: stale partial NOT superseded → still flagged', () => {
@@ -220,7 +224,8 @@ describe('gbrain doctor — half-migrated Minions detection', () => {
     );
 
     const result = run(['doctor', '--fast', '--json']);
-    expect(result.exitCode).toBe(1);
+    // FAIL-level check present → exit 2 (issue #5 contract).
+    expect(result.exitCode).toBe(2);
     const checks = JSON.parse(result.stdout).checks as Array<{ name: string; status: string; message: string }>;
     const minions = checks.find(c => c.name === 'minions_migration');
     expect(minions!.status).toBe('fail');
@@ -239,7 +244,8 @@ describe('gbrain doctor — half-migrated Minions detection', () => {
     );
 
     const result = run(['doctor', '--fast']);
-    expect(result.exitCode).toBe(1);
+    // FAIL-level check present → exit 2 (issue #5 contract).
+    expect(result.exitCode).toBe(2);
     expect(result.stdout).toContain('MINIONS HALF-INSTALLED');
     expect(result.stdout).toContain('gbrain apply-migrations --yes');
   });

@@ -1,5 +1,28 @@
 # TODOS
 
+## Issue-audit wave follow-ups (filed from v0.42.39.0, issues #1-#10)
+
+- [ ] **P2 — Migrate the remaining doctor `db.getConnection()` sites to `engine.executeRaw`.**
+  v0.42.39.0 fixed `pgvector` + `jsonb_integrity` (the two false-WARN checks on PGLite), but
+  three more checks silently degrade to false-`ok` skips on PGLite for the same reason:
+  `markdown_body_completeness` (~doctor.ts:5887), `oversized_pages` (~5938),
+  `scraper_junk_pages` (~5984). Sweep every `db.getConnection()` in doctor.ts to the engine
+  seam so they really run on both engines. **Where:** `src/commands/doctor.ts`; check whether
+  `scripts/check-no-legacy-getconnection.sh` allowlists doctor.ts and shrink the allowlist.
+
+- [ ] **P3 — Windows-host test quirks (pre-existing, baseline-confirmed during v0.42.39.0).**
+  (a) `test/serve-stdio-lifecycle.test.ts` "idle timer is reset on every stdin data chunk"
+  hangs forever under Bun 1.3.14 on Windows (unref'd timer never fires; per-test timeout
+  doesn't trigger). (b) `test/cli.test.ts` 10 failures: `Bun.spawn` ENOENT resolving `bun`
+  (node:child_process works). (c) `test/doctor-home-dir-in-worktree.test.ts` 2 failures.
+  (d) `test/doctor-cli-smoke.serial.test.ts` same `Bun.spawn` ENOENT class. None reproduce
+  on Linux CI. Either fix the spawn-resolution on Windows or gate the affected tests.
+
+- [ ] **P3 — Forward the upstream findings from issue #10 to garrytan/gbrain.** The triage
+  comment on #10 maps which of the 30 findings stay upstream (per-subcommand help registry,
+  config plane unification, skill consolidation, README restructure, MCP tool catalog,
+  destructive-tool dry-run params). File them as upstream issues, then close #10.
+
 ## gbrain#1972 job-layer follow-up (v0.43+)
 
 Filed from the #1972 fix (stale-lock reaper + bounded disconnect + complete

@@ -4,6 +4,7 @@
  */
 
 import { lstatSync, realpathSync } from 'fs';
+import { userInfo } from 'os';
 import { resolve, relative, sep } from 'path';
 import type { BrainEngine } from './engine.ts';
 import { clampSearchLimit } from './engine.ts';
@@ -285,6 +286,15 @@ export interface OperationContext {
    * per-operation scope enforcement.
    */
   auth?: AuthInfo;
+  /**
+   * Transport identity tag. Set ONLY by `src/mcp/server.ts` (the local stdio
+   * MCP transport). This is NOT a trust signal: every security gate keyed on
+   * `ctx.remote` / `ctx.auth` behaves exactly as if this field were absent
+   * (stdio stays `remote: true`, fail-closed). `whoami` is the only consumer
+   * — it uses the tag to return an identity shape instead of throwing
+   * `unknown_transport` for the local stdio pipe.
+   */
+  transport?: 'stdio';
   /**
    * True when the caller is remote/untrusted (MCP over stdio/HTTP, or any agent-facing entry point).
    * False for local CLI invocations by the owner of the machine.
@@ -3422,12 +3432,15 @@ const get_recent_transcripts: Operation = {
 const whoami: Operation = {
   name: 'whoami',
   description:
-    'Introspect the calling identity. Returns one of three transport shapes: ' +
+    'Introspect the calling identity. Returns one of four transport shapes: ' +
     '{transport: "oauth", client_id, client_name, scopes, expires_at}, ' +
-    '{transport: "legacy", token_name, scopes, expires_at: null}, or ' +
-    '{transport: "local", scopes: []}. Throws unknown_transport when the ' +
-    'context is ambiguous (remote=true without auth) — fail-closed posture ' +
-    'mirroring the v0.26.9 trust-boundary contract.',
+    '{transport: "legacy", token_name, scopes, expires_at: null}, ' +
+    '{transport: "local", scopes: []}, or ' +
+    '{transport: "stdio", user, source_id, takes_holders, scopes: []} for ' +
+    'the local stdio MCP pipe (no per-token auth; user is the OS account ' +
+    'running the server). Throws unknown_transport when the context is ' +
+    'ambiguous (remote=true without auth and no transport tag) — fail-closed ' +
+    'posture mirroring the v0.26.9 trust-boundary contract.',
   params: {},
   scope: 'read',
   handler: async (ctx) => {
@@ -3440,6 +3453,25 @@ const whoami: Operation = {
       return { transport: 'local', scopes: [] };
     }
     if (!ctx.auth) {
+      // Local stdio MCP: remote=true (untrusted, fail-closed gates apply)
+      // but the transport is known — return identity instead of throwing.
+      // scopes is [] to mirror the 'local' shape: hasScope([]) stays false,
+      // so nothing reads the stdio tag as a capability grant.
+      if (ctx.transport === 'stdio') {
+        let user: string;
+        try {
+          user = userInfo().username;
+        } catch {
+          user = process.env.USER || process.env.USERNAME || 'unknown';
+        }
+        return {
+          transport: 'stdio',
+          user,
+          source_id: ctx.sourceId,
+          takes_holders: ctx.takesHoldersAllowList ?? null,
+          scopes: [],
+        };
+      }
       throw new OperationError(
         'unknown_transport',
         'whoami called over a remote transport that did not thread ctx.auth. ' +
