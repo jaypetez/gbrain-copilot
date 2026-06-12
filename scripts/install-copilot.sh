@@ -13,7 +13,8 @@
 #                  --no-embedding) and replace an existing gbrain MCP entry
 #                  if present.
 #   --copy-skills  Also copy bundled skills to ~/.copilot/skills/ (skip if
-#                  you plan to use `/plugin install jaypetez/gbrain-copilot`,
+#                  you plan to install the plugin via `/plugin marketplace add
+#                  jaypetez/gbrain-copilot` + `/plugin install gbrain@gbrain-copilot`,
 #                  which ships them — using both duplicates skill names).
 #   --skip-init    Skip `gbrain init` (brain already exists).
 
@@ -147,14 +148,14 @@ if [ "$COPY_SKILLS" -eq 1 ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
   SKILLS_SRC="$SCRIPT_DIR/../skills"
   if [ ! -d "$SKILLS_SRC" ]; then
-    echo "WARN: skills/ not found next to this script (one-liner install?). Use /plugin install jaypetez/gbrain-copilot inside copilot instead." >&2
+    echo "WARN: skills/ not found next to this script (one-liner install?). Use /plugin marketplace add jaypetez/gbrain-copilot then /plugin install gbrain@gbrain-copilot inside copilot instead." >&2
   else
     mkdir -p "$COPILOT_DIR/skills"
     for d in "$SKILLS_SRC"/*/; do
       [ -f "$d/SKILL.md" ] || continue
       cp -R "$d" "$COPILOT_DIR/skills/$(basename "$d")"
     done
-    echo "Copied skills (do NOT also /plugin install, or skill names will collide)"
+    echo "Copied skills (do NOT also install the plugin, or skill names will collide)"
   fi
 fi
 
@@ -188,8 +189,9 @@ cat <<'EOF'
  gbrain is wired into GitHub Copilot CLI. Next steps:
    1. copilot                      # start Copilot CLI
    2. /mcp                         # confirm gbrain is running
-   3. /plugin install jaypetez/gbrain-copilot   # skills + gbrain agent
-   4. ask: "search my brain for <topic>"
+   3. /plugin marketplace add jaypetez/gbrain-copilot
+   4. /plugin install gbrain@gbrain-copilot     # skills + gbrain agent
+   5. ask: "search my brain for <topic>"
  Docs: COPILOT.md and docs/mcp/COPILOT_CLI.md
 =============================================================
 EOF
