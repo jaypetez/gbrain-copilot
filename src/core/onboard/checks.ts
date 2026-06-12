@@ -78,10 +78,10 @@ export async function checkEmbedStaleness(
       status: 'remediable',
     }));
   } else {
-    // v0.41.18.0: warn-only even on large backlogs. Doctor exit code should
-    // not flip from a brain that has pages waiting to be embedded — that's
-    // a "needs work" condition, not a "broken" one. The high-severity
-    // remediation still surfaces via onboard's plan.
+    // Warn-only even on large backlogs. Pages waiting to be embedded are a
+    // "needs work" condition (warn-level, doctor exit 1), never "broken"
+    // (fail-level, doctor exit 2). The high-severity remediation still
+    // surfaces via onboard's plan.
     status = 'warn';
     message = `${staleCount} stale chunks (large backlog — vector search returning outdated content)`;
     remediations.push(makeRemediationStep({
@@ -163,11 +163,11 @@ export async function checkEntityLinkCoverage(
   let status: 'ok' | 'warn' | 'fail' = 'ok';
   let message: string;
 
-  // v0.41.18.0: warn-only, never fail. Empty entity link coverage is "needs
-  // work" not "broken" — doctor's exit code should not flip from a fresh
-  // brain with entity pages but no auto-extracted links yet. Fail status
-  // would break `gbrain doctor exits 0` contract; the recommendation
-  // surfaces the same fix via the onboard plan either way.
+  // Warn-only, never fail. Low entity link coverage is "needs work"
+  // (warn-level, doctor exit 1) not "broken" (fail-level, doctor exit 2) —
+  // a brain with entity pages but no auto-extracted links yet is healthy
+  // data awaiting enrichment. The recommendation surfaces the same fix via
+  // the onboard plan either way.
   if (coverage >= 0.7) {
     message = `Coverage ${pct}% ± ${ciPct}%${sampleNote}`;
   } else if (coverage >= 0.4) {
@@ -254,9 +254,10 @@ export async function checkTimelineCoverage(
   let status: 'ok' | 'warn' | 'fail' = 'ok';
   let message: string;
 
-  // v0.41.18.0: warn-only, never fail. Same posture as entity_link_coverage —
-  // the recommendation still surfaces in onboard's plan, but doctor exit
-  // code doesn't flip on a fresh brain.
+  // Warn-only, never fail. Same posture as entity_link_coverage: a coverage
+  // gap is "needs work" (warn-level, doctor exit 1), never "broken"
+  // (fail-level, doctor exit 2); the recommendation still surfaces in
+  // onboard's plan.
   if (coverage >= 0.9) {
     message = `Coverage ${pct}% ± ${ciPct}%${sampleNote}`;
   } else if (coverage >= 0.7) {
@@ -322,8 +323,8 @@ export async function checkTakesCount(
   if (takesCount >= 100) {
     message = `${takesCount} takes (calibration ready)`;
   } else if (takesCount === 0) {
-    status = 'warn';
     if (bootstrapEnabled) {
+      status = 'warn';
       message = `0 takes (bootstrap eligible — gbrain takes extract --from-pages)`;
       remediations.push(makeRemediationStep({
         id: 'onboard.takes_bootstrap',
@@ -337,6 +338,9 @@ export async function checkTakesCount(
         status: 'remediable',
       }));
     } else {
+      // Fresh-empty-brain demotion: with bootstrap consent not given (the
+      // default), 0 takes is the expected opt-out state, not a defect —
+      // status stays ok and the opt-in hint carries the path forward.
       message = '0 takes (takes.bootstrap_enabled is false; opt in to enable)';
     }
   } else {
@@ -416,7 +420,11 @@ export async function checkPackUpgradeAvailable(
     return {
       check: {
         name: 'pack_upgrade_available',
-        status: 'warn',
+        // Fresh-empty-brain demotion: an available successor pack is an
+        // opt-in upgrade nudge (it fires on pristine installs whose default
+        // pack predates the successor), not a defect — ok + hint, and the
+        // manual_only remediation still surfaces through onboard's plan.
+        status: 'ok',
         message:
           `Active pack: ${active.identity}. Successor available: ${successor.identity}. ` +
           `Preview: \`gbrain onboard --check --explain\``,

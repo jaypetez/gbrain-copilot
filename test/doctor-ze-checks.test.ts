@@ -40,6 +40,10 @@ describe('checkZeEmbeddingHealth', () => {
   // from the gateway (file plane source of truth) instead of the DB config
   // table. Tests configure the gateway directly via configureGateway()
   // rather than writing via engine.setConfig().
+  //
+  // Every call passes `{ fileCfg: ... }` explicitly so the check never
+  // reads the host machine's real ~/.gbrain/config.json (which may carry
+  // embedding_disabled or a real ZE key and flip the expected status).
 
   test('not on ZE: returns ok with skip message', async () => {
     configureGateway({
@@ -47,9 +51,25 @@ describe('checkZeEmbeddingHealth', () => {
       embedding_dimensions: 1536,
       env: { ...process.env },
     });
-    const check = await checkZeEmbeddingHealth(engine);
+    const check = await checkZeEmbeddingHealth(engine, { fileCfg: null });
     expect(check.status).toBe('ok');
     expect(check.message).toContain('not ZeroEntropy');
+  });
+
+  test('deferred setup (embedding_disabled): ok with configure hint', async () => {
+    // `gbrain init --no-embedding` writes the deferred-setup sentinel — a
+    // missing provider key is the expected state there, not a defect
+    // (issue #5: false warns on pristine installs).
+    configureGateway({
+      embedding_model: 'zeroentropyai:zembed-1',
+      embedding_dimensions: 1280,
+      env: { ...process.env },
+    });
+    await withEnv({ ZEROENTROPY_API_KEY: undefined }, async () => {
+      const check = await checkZeEmbeddingHealth(engine, { fileCfg: { embedding_disabled: true } });
+      expect(check.status).toBe('ok');
+      expect(check.message).toContain('deferred');
+    });
   });
 
   test('on ZE + no key: warns with setup hint', async () => {
@@ -60,7 +80,7 @@ describe('checkZeEmbeddingHealth', () => {
     });
     // Clear the env var for the no-key path (user's real env may have it set).
     await withEnv({ ZEROENTROPY_API_KEY: undefined }, async () => {
-      const check = await checkZeEmbeddingHealth(engine);
+      const check = await checkZeEmbeddingHealth(engine, { fileCfg: null });
       expect(check.status).toBe('warn');
       expect(check.message).toContain('ZEROENTROPY_API_KEY');
       expect(check.message).toContain('zeroentropy.dev');
@@ -74,22 +94,21 @@ describe('checkZeEmbeddingHealth', () => {
       env: { ...process.env },
     });
     await withEnv({ ZEROENTROPY_API_KEY: 'sk-fake-test' }, async () => {
-      const check = await checkZeEmbeddingHealth(engine);
+      const check = await checkZeEmbeddingHealth(engine, { fileCfg: null });
       expect(check.status).toBe('ok');
     });
   });
 
   // v0.37 fix wave note: ZE key now lives in file plane only (not DB plane).
-  // The "config key" path here exercises the file-plane fallback that
-  // checkZeEmbeddingHealth checks via loadConfigFileOnly().
-  test('on ZE + env key (file-plane equivalent): ok', async () => {
+  // This exercises the file-plane key path directly via the fileCfg seam.
+  test('on ZE + file-plane key: ok', async () => {
     configureGateway({
       embedding_model: 'zeroentropyai:zembed-1',
       embedding_dimensions: 1280,
       env: { ...process.env },
     });
-    await withEnv({ ZEROENTROPY_API_KEY: 'sk-fake-from-env' }, async () => {
-      const check = await checkZeEmbeddingHealth(engine);
+    await withEnv({ ZEROENTROPY_API_KEY: undefined }, async () => {
+      const check = await checkZeEmbeddingHealth(engine, { fileCfg: { zeroentropy_api_key: 'sk-fake-file' } });
       expect(check.status).toBe('ok');
     });
   });

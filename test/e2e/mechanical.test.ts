@@ -976,7 +976,7 @@ describeE2E('E2E: RLS Verification', () => {
     }
   });
 
-  test('gbrain doctor fails with exit 1 when a public table is missing RLS', async () => {
+  test('gbrain doctor fails with exit 2 when a public table is missing RLS', async () => {
     const conn = getConn();
     const tbl = `gbrain_rls_regression_${suffix}`;
     try {
@@ -1010,7 +1010,8 @@ describeE2E('E2E: RLS Verification', () => {
       expect(rls.status).toBe('fail');
       expect(rls.message).toContain(tbl);
       expect(rls.message).toContain('ALTER TABLE');
-      expect(result.exitCode).toBe(1);
+      // FAIL-level check → exit 2 (issue #5: 0=healthy, 1=warnings, 2=failures).
+      expect(result.exitCode).toBe(2);
     } finally {
       await conn.unsafe(`DROP TABLE IF EXISTS public.${tbl}`);
       // Restore the trigger via a no-op v35 replay so subsequent tests in
@@ -1070,7 +1071,8 @@ describeE2E('E2E: RLS Verification', () => {
       const rls = parsed.checks.find((c: any) => c.name === 'rls');
       expect(rls.status).toBe('fail');
       expect(rls.message).toContain(tbl);
-      expect(result.exitCode).toBe(1);
+      // FAIL-level check → exit 2 (issue #5: 0=healthy, 1=warnings, 2=failures).
+      expect(result.exitCode).toBe(2);
     } finally {
       await conn.unsafe(`DROP TABLE IF EXISTS public.${tbl}`);
     }
@@ -1096,7 +1098,8 @@ describeE2E('E2E: RLS Verification', () => {
       const parsed = JSON.parse(stdout);
       const rls = parsed.checks.find((c: any) => c.name === 'rls');
       expect(rls.status).toBe('fail');
-      expect(result.exitCode).toBe(1);
+      // FAIL-level check → exit 2 (issue #5: 0=healthy, 1=warnings, 2=failures).
+      expect(result.exitCode).toBe(2);
     } finally {
       await conn.unsafe(`DROP TABLE IF EXISTS public.${tbl}`);
     }
