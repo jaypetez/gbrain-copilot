@@ -4,6 +4,9 @@ import type {
   SearchResult, SearchOpts,
   Link, GraphNode, GraphPath, RelationalFanoutRow, RelationalFanoutOpts,
   TimelineEntry, TimelineInput, TimelineOpts,
+  ChronicleTimelineRow, ChronicleTimelineOpts, LastSeenResult,
+  OntologyObservationInput, OntologyMergeResult, OntologyValue, OntologyDimensionStat,
+  OntologyConflict, OntologyReadOpts,
   RawData,
   PageVersion,
   BrainStats, BrainHealth,
@@ -650,6 +653,15 @@ export interface BrainEngine {
   // Lifecycle
   connect(config: EngineConfig): Promise<void>;
   disconnect(): Promise<void>;
+  /**
+   * Recover a dropped connection using the config captured at the last
+   * `connect()`. Callers (autopilot health probe, batchRetry) MUST use this
+   * instead of `disconnect()` + bare `connect()`: the latter loses the config
+   * (#2034 — a bare `connect()` with no args throws `database_url undefined`
+   * forever) AND opens a null-connection window. Implemented on BOTH engines
+   * for parity so the call is never a silent no-op.
+   */
+  reconnect(ctx?: { error?: unknown }): Promise<void>;
   initSchema(): Promise<void>;
   transaction<T>(fn: (engine: BrainEngine) => Promise<T>): Promise<T>;
   /**
@@ -1136,13 +1148,23 @@ export interface BrainEngine {
    * sources (pre-v0.31.8 behavior; preserved via two-branch query in both
    * engines). When set, the from-page filter becomes
    * `WHERE f.slug = $1 AND f.source_id = $X`.
+   *
+   * #2200: `opts.sourceIds` is a federated read grant (caller's allowedSources).
+   * It takes precedence over scalar `sourceId` and constrains BOTH endpoints
+   * (from AND to) to the grant via `source_id = ANY($::text[])` — so an in-grant
+   * page linking to an out-of-grant page does NOT leak the foreign slug/context
+   * (carries the `traversePaths` both-endpoint invariant). Remote MCP clients
+   * always route here (sourceScopeOpts emits an array for any allowedSources
+   * grant); the scalar branch is internal/CLI and keeps cross-source visibility
+   * (reconcileLinks + back-link validators depend on it).
    */
-  getLinks(slug: string, opts?: { sourceId?: string }): Promise<Link[]>;
+  getLinks(slug: string, opts?: { sourceId?: string; sourceIds?: string[] }): Promise<Link[]>;
   /**
    * v0.31.8 (D12 + D16): same `opts.sourceId` semantics as `getLinks`,
-   * applied to the to-page side of the join.
+   * applied to the to-page side of the join. #2200: `opts.sourceIds` federated
+   * grant constrains both endpoints (see `getLinks`).
    */
-  getBacklinks(slug: string, opts?: { sourceId?: string }): Promise<Link[]>;
+  getBacklinks(slug: string, opts?: { sourceId?: string; sourceIds?: string[] }): Promise<Link[]>;
   /**
    * v114 (#1941): distinct link_source provenances with edge counts, for
    * `gbrain link-sources`. Source-scoped via `{sourceId?, sourceIds?}` (both
@@ -1321,7 +1343,13 @@ export interface BrainEngine {
    */
   addTag(slug: string, tag: string, opts?: { sourceId?: string }): Promise<void>;
   removeTag(slug: string, tag: string, opts?: { sourceId?: string }): Promise<void>;
-  getTags(slug: string, opts?: { sourceId?: string }): Promise<string[]>;
+  /**
+   * #2200: getTags ALSO accepts a federated `sourceIds[]` read grant (precedence
+   * over scalar `sourceId`); it unions tags across the matched same-slug pages
+   * via `page_id IN (…) … DISTINCT`. The write-side addTag/removeTag deliberately
+   * stay scalar-only — `allowedSources` is a read grant; writes route to one source.
+   */
+  getTags(slug: string, opts?: { sourceId?: string; sourceIds?: string[] }): Promise<string[]>;
 
   // Timeline
   /**
@@ -1356,6 +1384,42 @@ export interface BrainEngine {
    */
   addTimelineEntriesBatch(entries: TimelineBatchInput[], opts?: BatchOpts): Promise<number>;
   getTimeline(slug: string, opts?: TimelineOpts): Promise<TimelineEntry[]>;
+
+  // v0.42.x — Life Chronicle (#2390) timeline reads. All filter the depth page
+  // (and any event page) on deleted_at IS NULL, order by COALESCE(event
+  // effective_date, date), and honor source scope (sourceIds[] > sourceId).
+  /** Events/timeline rows on a given day (or its ISO week when opts.week). */
+  getTimelineForDate(date: string, opts?: ChronicleTimelineOpts): Promise<ChronicleTimelineRow[]>;
+  /** Events/timeline rows on or after `date`, optionally filtered by event.kind. */
+  getSince(date: string, opts?: ChronicleTimelineOpts): Promise<ChronicleTimelineRow[]>;
+  /** "On this day" — events from the same month-day in PRIOR years (default: today). */
+  getOnThisDay(opts?: { date?: string; limit?: number; sourceId?: string; sourceIds?: string[] }): Promise<ChronicleTimelineRow[]>;
+  /** Most recent date an entity appears (its own page or an event's `who`). */
+  getLastSeen(entitySlug: string, opts?: { asof?: string; sourceId?: string; sourceIds?: string[] }): Promise<LastSeenResult>;
+  /**
+   * Upsert the date-index projection row for an event page: page_id = depth
+   * page, event_page_id = event page, keyed (event_page_id, date). Re-extraction
+   * with a changed summary UPDATEs (no duplicate). Returns projected=false when
+   * either slug is missing in the source. Idempotent.
+   */
+  upsertEventProjection(opts: { depthSlug: string; eventSlug: string; date: string; summary: string; detail?: string; sourceId?: string }): Promise<{ projected: boolean }>;
+
+  // v0.42.x — Life Chronicle (#2390) per-entity ontology (rides `facts`).
+  /**
+   * Record one ontology observation (entity has dimension=value). Idempotent on
+   * the deterministic dedup key (source_id, entity_slug, dimension, value_hash,
+   * source_markdown_slug). A new value forward-supersedes the prior open row
+   * (expired_at + superseded_by); the same value corroborates; a backdated
+   * conflicting value is inserted WITHOUT rewriting the prior (surfaced by
+   * findOntologyConflicts). Never throws on dup — returns action 'noop'.
+   */
+  mergeOntologyFact(obs: OntologyObservationInput): Promise<OntologyMergeResult>;
+  /** Current resolved ontology for an entity at `asof` (default now). */
+  getOntology(entitySlug: string, opts?: OntologyReadOpts): Promise<OntologyValue[]>;
+  /** Meta-ontology: which dimensions exist across the brain, and how widely. */
+  discoverOntologyDimensions(opts?: { sourceId?: string; sourceIds?: string[] }): Promise<OntologyDimensionStat[]>;
+  /** Dimensions with ≥2 distinct current-open values from ≥2 provenances. */
+  findOntologyConflicts(opts?: { sourceId?: string; sourceIds?: string[]; minConfidence?: number }): Promise<OntologyConflict[]>;
 
   // Raw data
   /**
@@ -1678,7 +1742,20 @@ export interface BrainEngine {
    * until the v0_32_2 migration backfills them. Cycle-phase callers in
    * commit 7 add the empty-fence-guard as a belt-and-suspenders check.
    */
-  deleteFactsForPage(slug: string, source_id: string): Promise<{ deleted: number }>;
+  /**
+   * #1928: `excludeSourcePrefixes` protects facts whose `source` matches any
+   * given prefix (e.g. `['cli:']` for conversation facts written by
+   * `extract-conversation-facts`) from a fence reconcile. Those rows are NOT
+   * fence-owned — a destructive wipe-and-reinsert pass would delete them and
+   * never recreate them (the page has no `## Facts` fence). Omitted ⇒ legacy
+   * behavior (delete every fact on the page coordinate). NULL/empty `source`
+   * rows are always deletable (fence default).
+   */
+  deleteFactsForPage(
+    slug: string,
+    source_id: string,
+    opts?: { excludeSourcePrefixes?: string[] },
+  ): Promise<{ deleted: number }>;
 
   /**
    * Mark a fact expired. Never DELETE. Returns true iff a row was updated.
