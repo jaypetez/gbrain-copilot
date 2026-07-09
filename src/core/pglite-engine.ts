@@ -30,6 +30,9 @@ import type {
   SearchResult, SearchOpts,
   Link, GraphNode, GraphPath,
   TimelineEntry, TimelineInput, TimelineOpts,
+  ChronicleTimelineRow, ChronicleTimelineOpts, LastSeenResult,
+  OntologyObservationInput, OntologyMergeResult, OntologyValue, OntologyDimensionStat,
+  OntologyConflict, OntologyReadOpts,
   RawData,
   PageVersion,
   BrainStats, BrainHealth,
@@ -46,8 +49,9 @@ import { validateSlug, contentHash, rowToPage, rowToStalePage, rowToChunk, rowTo
 import { deriveResolutionTuple, finalizeScorecard } from './takes-resolution.ts';
 import { normalizeWeightForStorage } from './takes-fence.ts';
 import { executeRawJsonb } from './sql-query.ts';
-import { stripNul, buildLinkRows, buildTimelineRows, buildTakeRows } from './batch-rows.ts';
+import { sanitizeForJsonb, buildLinkRows, buildTimelineRows, buildTakeRows } from './batch-rows.ts';
 import { GBrainError, PAGE_SORT_SQL, ENRICH_ORDER_SQL } from './types.ts';
+import { finalizeLastSeen } from './chronicle/last-seen.ts';
 import { computeAnomaliesFromBuckets } from './cycle/anomaly.ts';
 import { resolveBoostMap, resolveHardExcludes } from './search/source-boost.ts';
 import { buildSourceFactorCase, buildHardExcludeClause, buildVisibilityClause, buildRecencyComponentSql, buildBestPerPagePoolCte } from './search/sql-ranking.ts';
@@ -154,10 +158,18 @@ export function computeSnapshotSchemaHash(
  * errors). Match the literal `$$bunfs` marker OR ENOENT+pglite.data
  * co-occurrence.
  */
-export type PgliteInitFailure = 'bunfs' | 'macos-26-3' | 'unknown';
+export type PgliteInitFailure = 'bunfs' | 'macos-26-3' | 'corrupt' | 'unknown';
 
 export function classifyPgliteInitError(message: string): PgliteInitFailure {
   if (/\$\$bunfs|ENOENT[\s\S]*pglite\.data/i.test(message)) return 'bunfs';
+  // #2348: a corrupted PGLite data dir (two OS processes opened it concurrently
+  // and trashed the catalog/extension state) surfaces as a 58P01 internal error
+  // loading the pgvector library, or the vector type / a core relation gone
+  // missing. Distinct, actionable cause — must beat the generic wasm-runtime
+  // match below so the user is pointed at recovery, not the macOS WASM bug.
+  if (/58P01|internal_load_library|type "?vector"? does not exist|relation "?content_chunks"? does not exist/i.test(message)) {
+    return 'corrupt';
+  }
   if (/abort.*runtime|macos.*26\.3|wasm.*runtime/i.test(message)) {
     return 'macos-26-3';
   }
@@ -184,6 +196,18 @@ export function buildPgliteInitErrorMessage(
         '  This is most commonly the macOS 26.3 WASM bug:\n' +
         '  https://github.com/garrytan/gbrain/issues/223';
       break;
+    case 'corrupt':
+      hint =
+        '  Your PGLite store looks corrupted (the catalog or the pgvector\n' +
+        '  extension cannot load). This happens when two processes opened the\n' +
+        '  same brain at once — now prevented (#2348), but an already-damaged\n' +
+        '  store cannot be repaired in place. Recover:\n' +
+        '    1. Restore a backup of the brain.pglite directory if you have one, OR\n' +
+        '    2. Rebuild from your brain repo:\n' +
+        '       gbrain reinit-pglite --embedding-model <id> --embedding-dimensions <N>\n' +
+        '       (wipes + re-inits + re-syncs; DB-only state is re-derived).\n' +
+        '  Deleting .gbrain-lock/ or postmaster.pid does NOT fix this.';
+      break;
     case 'unknown':
     default:
       hint =
@@ -195,10 +219,39 @@ export function buildPgliteInitErrorMessage(
   return `${header}\n${hint}\n  Original error: ${original}`;
 }
 
+/**
+ * #2084 — PGLite's Emscripten runtime hijacks `process.exitCode` as ITS status
+ * channel: instantiation REPLACES the property with an accessor whose getter
+ * falls back to the WASM runtime status (99 while alive, the exit status after
+ * close) whenever no explicit value was assigned — and assigning `undefined`
+ * resets to that fallback, so "unset" cannot be restored. Pre-fix, every clean
+ * PGLite run carried a bogus 99 until close zeroed it, and an errored op's
+ * exit 1 survived only by accident of write ordering.
+ *
+ * Containment: around PGlite.create(), snapshot the pre-call value and restore
+ * it — pinning an explicit 0 when nothing was set, because restoring
+ * `undefined` would surface the WASM fallback instead. This keeps the GLOBAL
+ * tidy for external readers; the CLI's own verdict never reads it (it lives in
+ * the owned channel: setCliExitVerdict/currentExitCode, cli-force-exit.ts —
+ * in-memory brains run initdb whose status lands on a later tick, past any
+ * snapshot). db.close() stays unwrapped (see the comment at the close site).
+ */
+async function preservingProcessExitCode<T>(fn: () => Promise<T>): Promise<T> {
+  const pre = process.exitCode;
+  try {
+    return await fn();
+  } finally {
+    process.exitCode = typeof pre === 'number' || typeof pre === 'string' ? pre : 0;
+  }
+}
+
 export class PGLiteEngine implements BrainEngine {
   readonly kind = 'pglite' as const;
   private _db: PGLiteDB | null = null;
   private _lock: LockHandle | null = null;
+  // #2034: captured at connect() so reconnect() can restore the same data dir
+  // after a drop, matching PostgresEngine's _savedConfig contract.
+  private _savedConfig: EngineConfig | null = null;
   // Tier 3: when GBRAIN_PGLITE_SNAPSHOT loaded a post-initSchema state into
   // PGlite.create(loadDataDir), initSchema is a no-op (schema is already
   // present + migrations already applied). Saves ~1-3s per fresh test PGLite.
@@ -211,6 +264,7 @@ export class PGLiteEngine implements BrainEngine {
 
   // Lifecycle
   async connect(config: EngineConfig): Promise<void> {
+    this._savedConfig = config; // #2034: remember for reconnect()
     const dataDir = config.database_path || undefined; // undefined = in-memory
 
     // Acquire file lock to prevent concurrent PGLite access (crashes with Aborted())
@@ -234,12 +288,20 @@ export class PGLiteEngine implements BrainEngine {
       }
     }
 
+    // NOTE (#2084): PGLite's Emscripten runtime writes the WASM backend's
+    // proc_exit status into `process.exitCode` (initdb here at create-time,
+    // the postmaster at close-time), and the writes land asynchronously —
+    // a snapshot/restore around these awaits does NOT contain them. That is
+    // why the CLI's exit paths read gbrain's own verdict
+    // (cli-force-exit.ts currentExitCode), never ambient process.exitCode.
     try {
-      this._db = await PGlite.create({
-        dataDir,
-        loadDataDir,
-        extensions: { vector, pg_trgm },
-      });
+      this._db = await preservingProcessExitCode(() =>
+        PGlite.create({
+          dataDir,
+          loadDataDir,
+          extensions: { vector, pg_trgm },
+        }),
+      );
     } catch (err) {
       // v0.13.1: any PGLite.create() failure becomes actionable. v0.41.8.0
       // (#1340): the previous error hint hardcoded the macOS 26.3 link, but
@@ -279,6 +341,12 @@ export class PGLiteEngine implements BrainEngine {
     this._lock = null;
     try {
       if (db) {
+        // Deliberately NOT wrapped in preservingProcessExitCode: close's
+        // status write (0) is long-standing baseline behavior that test-runner
+        // processes depend on (wrapping it flipped bun test's own exit code —
+        // #2084 implementation note), and the CLI's exit verdict doesn't read
+        // process.exitCode at all — it lives in the gbrain-owned channel
+        // (setCliExitVerdict/currentExitCode in cli-force-exit.ts).
         await db.close();
       }
     } finally {
@@ -286,6 +354,27 @@ export class PGLiteEngine implements BrainEngine {
         await releaseLock(lock);
       }
     }
+  }
+
+  /**
+   * #2034: engine-parity reconnect. PGLite is single-writer in-process so it
+   * doesn't suffer the pool-drop class PostgresEngine.reconnect() handles, but
+   * the method MUST exist so callers (autopilot health probe, worker/queue
+   * claim-error recovery) can call `engine.reconnect()` uniformly.
+   *
+   * IN-MEMORY (no `database_path`) is a NO-OP: there is no persistent backing,
+   * the connection can't recoverably "drop" in-process, and a disconnect+reopen
+   * would DISCARD all state. This matches the long-standing assumption the
+   * worker/queue recovery paths are written against ("PGLite has no pooler
+   * reaping so reconnect is absent" — src/core/minions/queue.ts). A FILE-backed
+   * engine genuinely re-opens the same data dir (state persists on disk).
+   */
+  async reconnect(_ctx?: { error?: unknown }): Promise<void> {
+    if (!this._savedConfig) return; // never connected — nothing to restore
+    if (!this._savedConfig.database_path) return; // in-memory — no-op, preserve state
+    const config = this._savedConfig;
+    await this.disconnect();
+    await this.connect(config);
   }
 
   async initSchema(): Promise<void> {
@@ -2434,7 +2523,7 @@ export class PGLiteEngine implements BrainEngine {
        ON CONFLICT (from_page_id, to_page_id, link_type, link_source, origin_page_id) DO UPDATE SET
          context = EXCLUDED.context,
          origin_field = EXCLUDED.origin_field`,
-      [from, to, linkType || '', stripNul(context || ''), src, originSlug ?? null, originField ?? null, fromSrc, toSrc, originSrc]
+      [from, to, linkType || '', sanitizeForJsonb(context || ''), src, originSlug ?? null, originField ?? null, fromSrc, toSrc, originSrc]
     );
   }
 
@@ -2518,12 +2607,29 @@ export class PGLiteEngine implements BrainEngine {
     }
   }
 
-  async getLinks(slug: string, opts?: { sourceId?: string }): Promise<Link[]> {
-    // v0.31.8 (D16): two-branch query. Without opts.sourceId, no source filter
-    // (preserves pre-v0.31.8 cross-source semantics for back-link validators
-    // and read-side op handlers that haven't threaded sourceId yet). With
-    // opts.sourceId, scope to that source — used by reconcileLinks and any
-    // ctx.sourceId-aware read op (D20).
+  async getLinks(slug: string, opts?: { sourceId?: string; sourceIds?: string[] }): Promise<Link[]> {
+    // #2200: federated grant scopes ALL THREE page endpoints — from, to, AND the
+    // origin (the authoring page, surfaced as origin_slug). The origin LEFT JOIN
+    // carries the same ANY($) filter so an out-of-grant origin's slug nulls out.
+    // Remote MCP clients always land here.
+    if (opts?.sourceIds && opts.sourceIds.length > 0) {
+      const { rows } = await this.db.query(
+        `SELECT f.slug as from_slug, t.slug as to_slug,
+                l.link_type, l.context, l.link_source,
+                o.slug as origin_slug, l.origin_field
+         FROM links l
+         JOIN pages f ON f.id = l.from_page_id
+         JOIN pages t ON t.id = l.to_page_id
+         LEFT JOIN pages o ON o.id = l.origin_page_id AND o.source_id = ANY($2::text[])
+         WHERE f.slug = $1 AND f.source_id = ANY($2::text[]) AND t.source_id = ANY($2::text[])`,
+        [slug, opts.sourceIds]
+      );
+      return rows as unknown as Link[];
+    }
+    // v0.31.8 (D16) + #2200: the federated arm above is the first branch; the two
+    // below preserve pre-v0.31.8 semantics. Without opts.sourceId, no source filter
+    // (cross-source view for back-link validators and reconcileLinks). With
+    // opts.sourceId, scope to that source (D20).
     if (opts?.sourceId) {
       const { rows } = await this.db.query(
         `SELECT f.slug as from_slug, t.slug as to_slug,
@@ -2552,8 +2658,25 @@ export class PGLiteEngine implements BrainEngine {
     return rows as unknown as Link[];
   }
 
-  async getBacklinks(slug: string, opts?: { sourceId?: string }): Promise<Link[]> {
-    // v0.31.8 (D16): two-branch query. See getLinks() comment.
+  async getBacklinks(slug: string, opts?: { sourceId?: string; sourceIds?: string[] }): Promise<Link[]> {
+    // #2200: federated grant scopes all three endpoints (mirrors getLinks) — the
+    // referrer (from), the queried page (to), AND the origin — so neither a
+    // foreign referrer nor a foreign origin slug is disclosed to the caller.
+    if (opts?.sourceIds && opts.sourceIds.length > 0) {
+      const { rows } = await this.db.query(
+        `SELECT f.slug as from_slug, t.slug as to_slug,
+                l.link_type, l.context, l.link_source,
+                o.slug as origin_slug, l.origin_field
+         FROM links l
+         JOIN pages f ON f.id = l.from_page_id
+         JOIN pages t ON t.id = l.to_page_id
+         LEFT JOIN pages o ON o.id = l.origin_page_id AND o.source_id = ANY($2::text[])
+         WHERE t.slug = $1 AND t.source_id = ANY($2::text[]) AND f.source_id = ANY($2::text[])`,
+        [slug, opts.sourceIds]
+      );
+      return rows as unknown as Link[];
+    }
+    // v0.31.8 (D16) + #2200: federated arm above is first; two below mirror getLinks.
     if (opts?.sourceId) {
       const { rows } = await this.db.query(
         `SELECT f.slug as from_slug, t.slug as to_slug,
@@ -3166,14 +3289,20 @@ export class PGLiteEngine implements BrainEngine {
     );
   }
 
-  async getTags(slug: string, opts?: { sourceId?: string }): Promise<string[]> {
-    const sourceId = opts?.sourceId ?? 'default';
-    // Source-qualify the page-id subquery; slugs are only unique per source.
+  async getTags(slug: string, opts?: { sourceId?: string; sourceIds?: string[] }): Promise<string[]> {
+    // #2200: federated grant (sourceIds[]) wins over scalar. `page_id IN (..)`
+    // (not `= (..)`) so a slug present in >1 allowed source doesn't blow up;
+    // DISTINCT unions tags across the matched pages. Scalar/unscoped keeps the
+    // legacy `?? 'default'` default. Source-qualify; slugs are unique per source.
+    const scope =
+      opts?.sourceIds && opts.sourceIds.length > 0
+        ? { sql: 'source_id = ANY($2::text[])', param: opts.sourceIds }
+        : { sql: 'source_id = $2', param: opts?.sourceId ?? 'default' };
     const { rows } = await this.db.query(
-      `SELECT tag FROM tags
-       WHERE page_id = (SELECT id FROM pages WHERE slug = $1 AND source_id = $2)
+      `SELECT DISTINCT tag FROM tags
+       WHERE page_id IN (SELECT id FROM pages WHERE slug = $1 AND ${scope.sql})
        ORDER BY tag`,
-      [slug, sourceId]
+      [slug, scope.param]
     );
     return (rows as { tag: string }[]).map(r => r.tag);
   }
@@ -3197,12 +3326,14 @@ export class PGLiteEngine implements BrainEngine {
     // ON CONFLICT DO NOTHING via the (page_id, date, summary) unique index.
     // Source-qualify the page-id lookup so multi-source brains don't fan
     // timeline rows out across every source containing the slug.
+    // Free-text body fields are NUL + lone-surrogate sanitized (#2011), matching
+    // the batch path and the Postgres engine; identity fields (slug, date) raw.
     await this.db.query(
       `INSERT INTO timeline_entries (page_id, date, source, summary, detail)
        SELECT id, $2::date, $3, $4, $5
        FROM pages WHERE slug = $1 AND source_id = $6
        ON CONFLICT (page_id, date, summary, source) DO NOTHING`,
-      [slug, entry.date, entry.source || '', entry.summary, entry.detail || '', sourceId]
+      [slug, entry.date, sanitizeForJsonb(entry.source || ''), sanitizeForJsonb(entry.summary), sanitizeForJsonb(entry.detail || ''), sourceId]
     );
   }
 
@@ -3233,9 +3364,11 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async getTimeline(slug: string, opts?: TimelineOpts): Promise<TimelineEntry[]> {
-    // v0.31.8 (D16): build WHERE clause dynamically so opts.sourceId composes
-    // cleanly with the existing after/before filters. Without sourceId, no
-    // source filter applies (preserves pre-v0.31.8 cross-source semantics).
+    // v0.31.8 (D16) + #2200: build WHERE clause dynamically so the source scope
+    // composes cleanly with the after/before filters. Precedence: federated
+    // sourceIds[] > scalar sourceId > unscoped (cross-source, pre-v0.31.8).
+    // (Postgres builds the equivalent via sql`` fragment composition — different
+    // idiom, same result; the engines stay lockstep on behavior, not on builder.)
     const limit = opts?.limit || 100;
     const where: string[] = ['p.slug = $1'];
     const params: unknown[] = [slug];
@@ -3247,7 +3380,12 @@ export class PGLiteEngine implements BrainEngine {
       params.push(opts.before);
       where.push(`te.date <= $${params.length}::date`);
     }
-    if (opts?.sourceId) {
+    // #2200: federated grant (sourceIds[]) wins over scalar sourceId. The join
+    // unions timeline entries across every same-slug page in the grant.
+    if (opts?.sourceIds && opts.sourceIds.length > 0) {
+      params.push(opts.sourceIds);
+      where.push(`p.source_id = ANY($${params.length}::text[])`);
+    } else if (opts?.sourceId) {
       params.push(opts.sourceId);
       where.push(`p.source_id = $${params.length}`);
     }
@@ -3260,6 +3398,269 @@ export class PGLiteEngine implements BrainEngine {
       params
     );
     return result.rows as unknown as TimelineEntry[];
+  }
+
+  // ── v0.42.x Life Chronicle (#2390) timeline reads ───────────────────────
+  // Same result contract as the Postgres engine (parity is on results, not the
+  // builder idiom): JOIN depth page (deleted_at IS NULL), LEFT JOIN event page,
+  // hide soft-deleted event projections, order by COALESCE(event effective_date,
+  // date). Source scope: federated sourceIds[] > scalar sourceId > unscoped.
+  private pushChronicleSource(where: string[], params: unknown[], opts?: { sourceId?: string; sourceIds?: string[] }): void {
+    if (opts?.sourceIds && opts.sourceIds.length > 0) {
+      params.push(opts.sourceIds);
+      where.push(`p.source_id = ANY($${params.length}::text[])`);
+    } else if (opts?.sourceId) {
+      params.push(opts.sourceId);
+      where.push(`p.source_id = $${params.length}`);
+    }
+  }
+
+  private static CHRONICLE_SELECT = `
+    SELECT te.date::text AS date, te.summary, te.detail, te.source,
+           te.page_id, p.slug AS page_slug,
+           te.event_page_id, ep.slug AS event_slug,
+           ep.effective_date::text AS effective_date,
+           ep.frontmatter->'event'->>'kind' AS kind
+    FROM timeline_entries te
+    JOIN pages p ON p.id = te.page_id AND p.deleted_at IS NULL
+    LEFT JOIN pages ep ON ep.id = te.event_page_id`;
+
+  async getTimelineForDate(date: string, opts?: ChronicleTimelineOpts): Promise<ChronicleTimelineRow[]> {
+    const limit = opts?.limit ?? 200;
+    const params: unknown[] = [date];
+    const lower = opts?.week ? `date_trunc('week', $1::date)::date` : `$1::date`;
+    const upper = opts?.week ? `(date_trunc('week', $1::date) + interval '6 days')::date` : `$1::date`;
+    const where: string[] = [
+      `te.date >= ${lower}`,
+      `te.date <= ${upper}`,
+      `(te.event_page_id IS NULL OR ep.deleted_at IS NULL)`,
+    ];
+    this.pushChronicleSource(where, params, opts);
+    params.push(limit);
+    const result = await this.db.query(
+      `${PGLiteEngine.CHRONICLE_SELECT}
+       WHERE ${where.join(' AND ')}
+       ORDER BY COALESCE(ep.effective_date, te.date::timestamptz) ASC, te.id ASC
+       LIMIT $${params.length}`,
+      params,
+    );
+    return result.rows as unknown as ChronicleTimelineRow[];
+  }
+
+  async getSince(date: string, opts?: ChronicleTimelineOpts): Promise<ChronicleTimelineRow[]> {
+    const limit = opts?.limit ?? 200;
+    const params: unknown[] = [date];
+    const where: string[] = [
+      `te.date >= $1::date`,
+      `(te.event_page_id IS NULL OR ep.deleted_at IS NULL)`,
+    ];
+    if (opts?.kind) {
+      params.push(opts.kind);
+      where.push(`ep.frontmatter->'event'->>'kind' = $${params.length}`);
+    }
+    this.pushChronicleSource(where, params, opts);
+    params.push(limit);
+    const result = await this.db.query(
+      `${PGLiteEngine.CHRONICLE_SELECT}
+       WHERE ${where.join(' AND ')}
+       ORDER BY COALESCE(ep.effective_date, te.date::timestamptz) ASC, te.id ASC
+       LIMIT $${params.length}`,
+      params,
+    );
+    return result.rows as unknown as ChronicleTimelineRow[];
+  }
+
+  async getOnThisDay(opts?: { date?: string; limit?: number; sourceId?: string; sourceIds?: string[] }): Promise<ChronicleTimelineRow[]> {
+    const limit = opts?.limit ?? 50;
+    const params: unknown[] = [];
+    let target: string;
+    if (opts?.date) { params.push(opts.date); target = `$${params.length}::date`; }
+    else { target = `current_date`; }
+    const where: string[] = [
+      `EXTRACT(MONTH FROM te.date) = EXTRACT(MONTH FROM ${target})`,
+      `EXTRACT(DAY FROM te.date) = EXTRACT(DAY FROM ${target})`,
+      `te.date < ${target}`,
+      `(te.event_page_id IS NULL OR ep.deleted_at IS NULL)`,
+    ];
+    this.pushChronicleSource(where, params, opts);
+    params.push(limit);
+    const result = await this.db.query(
+      `${PGLiteEngine.CHRONICLE_SELECT}
+       WHERE ${where.join(' AND ')}
+       ORDER BY te.date DESC, te.id ASC
+       LIMIT $${params.length}`,
+      params,
+    );
+    return result.rows as unknown as ChronicleTimelineRow[];
+  }
+
+  async getLastSeen(entitySlug: string, opts?: { asof?: string; sourceId?: string; sourceIds?: string[] }): Promise<LastSeenResult> {
+    const params: unknown[] = [entitySlug, `%${entitySlug}%`];
+    const where: string[] = [
+      `(te.event_page_id IS NULL OR ep.deleted_at IS NULL)`,
+      `(p.slug = $1 OR (ep.id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements_text(
+            CASE WHEN jsonb_typeof(ep.frontmatter->'event'->'who') = 'array'
+                 THEN ep.frontmatter->'event'->'who' ELSE '[]'::jsonb END
+          ) AS w(name) WHERE w.name = $1 OR w.name LIKE $2)))`,
+    ];
+    this.pushChronicleSource(where, params, opts);
+    const result = await this.db.query(
+      `SELECT te.date::text AS last_date, ep.slug AS last_event_slug
+       FROM timeline_entries te
+       JOIN pages p ON p.id = te.page_id AND p.deleted_at IS NULL
+       LEFT JOIN pages ep ON ep.id = te.event_page_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY COALESCE(ep.effective_date, te.date::timestamptz) DESC, te.id DESC
+       LIMIT 1`,
+      params,
+    );
+    const row = result.rows[0] as { last_date?: string; last_event_slug?: string } | undefined;
+    return finalizeLastSeen(entitySlug, row?.last_date ?? null, row?.last_event_slug ?? null, opts?.asof);
+  }
+
+  async upsertEventProjection(opts: { depthSlug: string; eventSlug: string; date: string; summary: string; detail?: string; sourceId?: string }): Promise<{ projected: boolean }> {
+    const sourceId = opts.sourceId ?? 'default';
+    const r = await this.db.query(
+      `INSERT INTO timeline_entries (page_id, date, source, summary, detail, event_page_id)
+       SELECT dp.id, $1::date, $2, $3, $4, ep.id
+       FROM pages dp, pages ep
+       WHERE dp.slug = $5 AND dp.source_id = $6 AND ep.slug = $7 AND ep.source_id = $6
+       ON CONFLICT (event_page_id, date) WHERE event_page_id IS NOT NULL
+       DO UPDATE SET summary = EXCLUDED.summary, detail = EXCLUDED.detail,
+                     page_id = EXCLUDED.page_id, source = EXCLUDED.source
+       RETURNING id`,
+      [opts.date, 'life-chronicle:event:' + opts.eventSlug, opts.summary, opts.detail ?? '', opts.depthSlug, sourceId, opts.eventSlug],
+    );
+    return { projected: r.rows.length > 0 };
+  }
+
+  async mergeOntologyFact(obs: OntologyObservationInput): Promise<OntologyMergeResult> {
+    const sourceId = obs.sourceId ?? 'default';
+    const { valueHash, normalizeDimension, isNovelDimension } = await import('./chronicle/ontology.ts');
+    const dimension = normalizeDimension(obs.dimension);
+    const vh = valueHash(obs.value);
+    const conf = obs.confidence ?? 0.7;
+    const status = obs.status ?? (isNovelDimension(dimension) ? 'quarantined' : 'active');
+    const visibility = obs.visibility ?? 'private';
+    const validFrom = obs.validFrom ?? null;
+    const validUntil = obs.validTo ?? null;
+    const factText = `${dimension}: ${obs.value}`;
+
+    // "current open" = open-ended (valid_until IS NULL) + not retracted.
+    const cur = await this.db.query(
+      `SELECT id, value_hash, valid_from FROM facts
+        WHERE source_id = $1 AND entity_slug = $2 AND dimension = $3 AND expired_at IS NULL AND valid_until IS NULL
+          AND (dim_status IS NULL OR dim_status = 'active')
+        ORDER BY valid_from DESC NULLS LAST, confidence DESC, id DESC LIMIT 1`,
+      [sourceId, obs.entitySlug, dimension],
+    );
+    const current = cur.rows[0] as { id: number; value_hash: string; valid_from: string | null } | undefined;
+
+    if (current && current.value_hash === vh) {
+      const ins = await this.db.query(
+        `INSERT INTO facts (source_id, entity_slug, fact, kind, visibility, dimension, value, value_hash, dim_status,
+                            confidence, source, source_markdown_slug, valid_from, valid_until, expired_at, consolidated_into)
+         VALUES ($1,$2,$3,'fact',$4,$5,$6,$7,$8,$9,$10,$10,COALESCE($11::timestamptz, now()),$12, now(), $13)
+         ON CONFLICT (source_id, entity_slug, dimension, value_hash, source_markdown_slug) WHERE dimension IS NOT NULL
+         DO NOTHING RETURNING id`,
+        [sourceId, obs.entitySlug, factText, visibility, dimension, obs.value, vh, status, conf, obs.source, validFrom, validUntil, current.id],
+      );
+      return ins.rows.length
+        ? { action: 'corroborated', factId: Number((ins.rows[0] as { id: number }).id), supersededId: null }
+        : { action: 'noop', factId: null, supersededId: null };
+    }
+
+    const ins = await this.db.query(
+      `INSERT INTO facts (source_id, entity_slug, fact, kind, visibility, dimension, value, value_hash, dim_status,
+                          confidence, source, source_markdown_slug, valid_from, valid_until)
+       VALUES ($1,$2,$3,'fact',$4,$5,$6,$7,$8,$9,$10,$10,COALESCE($11::timestamptz, now()),$12)
+       ON CONFLICT (source_id, entity_slug, dimension, value_hash, source_markdown_slug) WHERE dimension IS NOT NULL
+       DO NOTHING RETURNING id`,
+      [sourceId, obs.entitySlug, factText, visibility, dimension, obs.value, vh, status, conf, obs.source, validFrom, validUntil],
+    );
+    if (!ins.rows.length) return { action: 'noop', factId: null, supersededId: null };
+    const newId = Number((ins.rows[0] as { id: number }).id);
+
+    let supersededId: number | null = null;
+    if (current && status === 'active') {
+      const forward = validFrom == null || current.valid_from == null
+        || new Date(validFrom).getTime() >= new Date(current.valid_from).getTime();
+      if (forward) {
+        await this.db.query(
+          `UPDATE facts SET valid_until = COALESCE($1::timestamptz, now()), superseded_by = $2 WHERE id = $3 AND valid_until IS NULL`,
+          [validFrom, newId, current.id],
+        );
+        supersededId = current.id;
+      }
+    }
+    return { action: supersededId ? 'superseded_prior' : 'inserted', factId: newId, supersededId };
+  }
+
+  async getOntology(entitySlug: string, opts?: OntologyReadOpts): Promise<OntologyValue[]> {
+    const minConf = opts?.minConfidence ?? 0;
+    const includeQ = opts?.includeQuarantined ?? false;
+    const asof = opts?.asof ?? null;
+    const params: unknown[] = [entitySlug, asof, minConf, includeQ];
+    let scope: string;
+    if (opts?.sourceIds && opts.sourceIds.length) { params.push(opts.sourceIds); scope = `AND source_id = ANY($${params.length})`; }
+    else { params.push(opts?.sourceId ?? null); scope = `AND ($${params.length}::text IS NULL OR source_id = $${params.length})`; }
+    const r = await this.db.query(
+      `SELECT DISTINCT ON (dimension) dimension, value, confidence,
+         source_markdown_slug AS source, valid_from, valid_until AS valid_to,
+         COALESCE(dim_status,'active') AS status, id AS fact_id
+       FROM facts
+       WHERE entity_slug = $1 AND dimension IS NOT NULL AND expired_at IS NULL ${scope}
+         AND COALESCE(valid_from,'-infinity'::timestamptz) <= COALESCE($2::timestamptz, now())
+         AND COALESCE(valid_until,'infinity'::timestamptz) > COALESCE($2::timestamptz, now())
+         AND confidence >= $3
+         AND ($4::boolean OR dim_status IS NULL OR dim_status = 'active')
+       ORDER BY dimension, valid_from DESC NULLS LAST, confidence DESC, id DESC`,
+      params,
+    );
+    return r.rows.map((row) => ({ ...(row as OntologyValue), confidence: Number((row as { confidence: number }).confidence), fact_id: Number((row as { fact_id: number }).fact_id) }));
+  }
+
+  async discoverOntologyDimensions(opts?: { sourceId?: string; sourceIds?: string[] }): Promise<OntologyDimensionStat[]> {
+    const params: unknown[] = [];
+    let scope: string;
+    if (opts?.sourceIds && opts.sourceIds.length) { params.push(opts.sourceIds); scope = `AND source_id = ANY($${params.length})`; }
+    else { params.push(opts?.sourceId ?? null); scope = `AND ($${params.length}::text IS NULL OR source_id = $${params.length})`; }
+    const r = await this.db.query(
+      `SELECT dimension, count(DISTINCT entity_slug)::int AS entities, count(*)::int AS observations
+       FROM facts WHERE dimension IS NOT NULL AND expired_at IS NULL ${scope}
+       GROUP BY dimension ORDER BY entities DESC, dimension`,
+      params,
+    );
+    return r.rows.map((row) => {
+      const x = row as { dimension: string; entities: number; observations: number };
+      return { dimension: x.dimension, entities: Number(x.entities), observations: Number(x.observations) };
+    });
+  }
+
+  async findOntologyConflicts(opts?: { sourceId?: string; sourceIds?: string[]; minConfidence?: number }): Promise<OntologyConflict[]> {
+    const minConf = opts?.minConfidence ?? 0;
+    const params: unknown[] = [minConf];
+    let scope: string;
+    if (opts?.sourceIds && opts.sourceIds.length) { params.push(opts.sourceIds); scope = `AND source_id = ANY($${params.length})`; }
+    else { params.push(opts?.sourceId ?? null); scope = `AND ($${params.length}::text IS NULL OR source_id = $${params.length})`; }
+    const r = await this.db.query(
+      `WITH cur AS (
+         SELECT entity_slug, dimension, value, source_markdown_slug AS source, confidence, id AS fact_id
+         FROM facts WHERE dimension IS NOT NULL AND expired_at IS NULL AND valid_until IS NULL
+           AND (dim_status IS NULL OR dim_status = 'active') AND confidence >= $1 ${scope}
+       )
+       SELECT entity_slug, dimension,
+              json_agg(json_build_object('value', value, 'source', source, 'confidence', confidence, 'fact_id', fact_id)) AS values
+       FROM cur GROUP BY entity_slug, dimension
+       HAVING count(DISTINCT value) >= 2 AND count(DISTINCT source) >= 2
+       ORDER BY entity_slug, dimension`,
+      params,
+    );
+    return r.rows.map((row) => {
+      const x = row as { entity_slug: string; dimension: string; values: OntologyConflict['values'] };
+      return { entity_slug: x.entity_slug, dimension: x.dimension, values: typeof x.values === 'string' ? JSON.parse(x.values) : x.values };
+    });
   }
 
   // Raw data
@@ -3596,7 +3997,25 @@ export class PGLiteEngine implements BrainEngine {
     return { inserted: ids.length, ids };
   }
 
-  async deleteFactsForPage(slug: string, source_id: string): Promise<{ deleted: number }> {
+  async deleteFactsForPage(
+    slug: string,
+    source_id: string,
+    opts?: { excludeSourcePrefixes?: string[] },
+  ): Promise<{ deleted: number }> {
+    const prefixes = opts?.excludeSourcePrefixes;
+    if (prefixes && prefixes.length > 0) {
+      // #1928: keep rows whose `source` matches an excluded prefix (e.g.
+      // `cli:` conversation facts). COALESCE so NULL/empty-source fence rows
+      // stay deletable — only the explicitly-protected prefixes survive.
+      const patterns = prefixes.map(p => `${p}%`);
+      const result = await this.db.query(
+        `DELETE FROM facts
+           WHERE source_id = $1 AND source_markdown_slug = $2
+             AND NOT (COALESCE(source, '') LIKE ANY($3::text[]))`,
+        [source_id, slug, patterns],
+      );
+      return { deleted: result.affectedRows ?? 0 };
+    }
     const result = await this.db.query(
       `DELETE FROM facts WHERE source_id = $1 AND source_markdown_slug = $2`,
       [source_id, slug],
@@ -4906,7 +5325,7 @@ export class PGLiteEngine implements BrainEngine {
           e.from_chunk_id, e.to_chunk_id, e.from_symbol_qualified,
           e.to_symbol_qualified, e.edge_type,
           JSON.stringify(e.edge_metadata ?? {}),
-          e.source_id ?? null,
+          e.source_id ?? 'default',
         );
       }
       const res = await this.db.query(
@@ -4927,7 +5346,7 @@ export class PGLiteEngine implements BrainEngine {
         params.push(
           e.from_chunk_id, e.from_symbol_qualified, e.to_symbol_qualified, e.edge_type,
           JSON.stringify(e.edge_metadata ?? {}),
-          e.source_id ?? null,
+          e.source_id ?? 'default',
         );
       }
       const res = await this.db.query(

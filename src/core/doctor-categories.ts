@@ -60,6 +60,7 @@ export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
   'brain_score',
   'calibration_freshness',
   'child_table_orphans',
+  'chronicle_projection_health',
   'content_sanity_audit_recent',
   'contextual_retrieval_coverage',
   'contradictions',
@@ -123,6 +124,7 @@ export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
  */
 export const SKILL_CHECK_NAMES: ReadonlySet<string> = new Set([
   'resolver_health',
+  'retrieval_reflex_health',
   'skill_brain_first',
   'skill_conformance',
   'whoknows_health',
@@ -133,6 +135,7 @@ export const SKILL_CHECK_NAMES: ReadonlySet<string> = new Set([
  */
 export const OPS_CHECK_NAMES: ReadonlySet<string> = new Set([
   'alternative_providers',
+  'autopilot_fanout_concurrency',
   'autopilot_lock_scope',
   'batch_retry_health',
   'brainstorm_health',
@@ -181,6 +184,7 @@ export const META_CHECK_NAMES: ReadonlySet<string> = new Set([
   'schema_version',
   'slug_fallback_audit',
   'type_proliferation', // ships from src/core/onboard/checks.ts
+  'timeline_dedup_index',
   'upgrade_errors',
 ]);
 

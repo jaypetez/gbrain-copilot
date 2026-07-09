@@ -17,6 +17,7 @@ import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { withEnv } from './helpers/with-env.ts';
 import { checkHiddenBySearchPolicy } from '../src/commands/doctor.ts';
+import { configureGateway } from '../src/core/ai/gateway.ts';
 import { categorizeCheck } from '../src/core/doctor-categories.ts';
 import { buildQuarantineMarker } from '../src/core/quarantine.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
@@ -58,6 +59,18 @@ async function seed(
 }
 
 beforeAll(async () => {
+  // Pin the gateway to the legacy 1536-d shape BEFORE initSchema so the
+  // content_chunks.embedding column is vector(1536), matching this file's
+  // hardcoded basisEmbedding(1536) fixtures. Without this, a prior test in
+  // the same shard that configured a ZE/1280 gateway and didn't reset leaks
+  // into our beforeAll-time initSchema (which reads the global gateway before
+  // any beforeEach preload-restore fires), building a vector(1280) column and
+  // failing every insert with "expected 1280 dimensions, not 1536".
+  configureGateway({
+    embedding_model: 'openai:text-embedding-3-large',
+    embedding_dimensions: 1536,
+    env: { ...process.env },
+  });
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
