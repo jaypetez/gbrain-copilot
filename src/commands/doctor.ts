@@ -4177,7 +4177,14 @@ export function buildRetrievalReflexCheck(skillsDir: string | null): Check {
         ? 'enabled; not observed firing yet'
         : 'enabled but no observed activity and no visible resolve path (host capability may still supply it; policy skill carries otherwise)';
 
-    const status: Check['status'] = firedRecently || viablePathVisible ? 'ok' : 'warn';
+    // Issue #5 philosophy: an enabled-but-not-observably-firing reflex is a
+    // can't-confirm, not a known failure — the doctor cannot see host-supplied
+    // resolve paths (ctx.brainQuery) or a fresh/empty brain with nothing to
+    // resolve and no `gbrain serve` running yet. Report ok WITH the setup hint
+    // rather than a false warning that would flip the 0/1/2 exit code on a
+    // pristine brain (breaking the fresh-brain-exits-0 contract). Only an
+    // explicitly-disabled reflex (handled above) warns.
+    const status: Check['status'] = 'ok';
     const skillHint = skillInstalled
       ? ''
       : ' — policy skill not installed; run `gbrain integrations install retrieval-reflex --target <host-repo>`';
