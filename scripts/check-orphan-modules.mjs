@@ -26,7 +26,13 @@
 // Exit: 0 clean · 1 orphans or stale allowlist entries · 2 infra error.
 
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
-import { join, relative, dirname } from 'node:path';
+import { join, relative, dirname, sep } from 'node:path';
+
+// Repo-relative keys are compared against '/'-separated literals (the
+// entrypoint list, package.json exports, import specifiers), so every
+// relative() result is normalized. Without this the guard finds zero
+// entrypoints on Windows and exits 2 instead of walking anything.
+const rel = (from, to) => relative(from, to).split(sep).join('/');
 
 const root = process.argv[2] || process.env.GBRAIN_GUARD_ROOT || '.';
 const fixtureMode = !!(process.argv[2] || process.env.GBRAIN_GUARD_ROOT);
@@ -70,7 +76,7 @@ function main() {
     console.error(`check-orphan-modules: no src/ under ${root}`);
     process.exit(2);
   }
-  const srcFiles = walkDir(srcDir).map(p => relative(root, p));
+  const srcFiles = walkDir(srcDir).map(p => rel(root, p));
   const srcSet = new Set(srcFiles);
 
   let entries = [];
@@ -101,8 +107,8 @@ function main() {
   const resolveSpec = (fromFile, spec) => {
     const base = join(root, dirname(fromFile), spec);
     for (const cand of [base, `${base}.ts`, join(base, 'index.ts')]) {
-      const rel = relative(root, cand);
-      if (srcSet.has(rel)) return rel;
+      const key = rel(root, cand);
+      if (srcSet.has(key)) return key;
     }
     return null;
   };
@@ -139,7 +145,7 @@ function main() {
         const p = join(dir, e);
         const st = statSync(p);
         if (st.isDirectory()) walkTests(p);
-        else if (p.endsWith('.ts')) testFiles.push(relative(root, p));
+        else if (p.endsWith('.ts')) testFiles.push(rel(root, p));
       }
     })(join(root, 'test'));
     const allSeen = new Set();
@@ -155,9 +161,9 @@ function main() {
       while ((m = re.exec(text)) !== null) {
         const base = join(root, dirname(f), m[1]);
         for (const cand of [base, `${base}.ts`, join(base, 'index.ts')]) {
-          const rel = relative(root, cand);
-          if (srcSet.has(rel) || rel.startsWith('test/')) {
-            if (!allSeen.has(rel)) stack.push(rel);
+          const key = rel(root, cand);
+          if (srcSet.has(key) || key.startsWith('test/')) {
+            if (!allSeen.has(key)) stack.push(key);
             break;
           }
         }

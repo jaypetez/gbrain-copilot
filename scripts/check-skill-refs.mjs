@@ -21,7 +21,7 @@
 // Usage: bun scripts/check-skill-refs.mjs [--skills-dir skills/] [--allowlist scripts/skill-refs-allowlist.txt] [--no-cli-refs]
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
-import { join, relative, dirname } from 'node:path';
+import { join, relative, dirname, sep } from 'node:path';
 import { execSync } from 'node:child_process';
 
 const args = process.argv.slice(2);
@@ -92,8 +92,12 @@ const warnings = [];
 for (const file of files) {
   // Path identity is always "skills/<path-under-skills-dir>", independent of cwd
   // canonicalization (macOS /var vs /private/var) or an absolute --skills-dir.
-  const underSkills = relative(SKILLS_DIR, file);
-  const rel = join('skills', underSkills);
+  // Normalize to '/': every comparison below is against a '/'-separated
+  // literal (the allowlist file, the migrations prefix), so a Windows
+  // backslash path would silently miss both — turning documented migration
+  // files into donor-remnant failures.
+  const underSkills = relative(SKILLS_DIR, file).split(sep).join('/');
+  const rel = `skills/${underSkills}`;
   const inMigrations = underSkills.startsWith('migrations/');
   const text = readFileSync(file, 'utf8');
 
@@ -231,9 +235,9 @@ if (RUN_CLI_REFS) {
       }
     } catch {}
     for (const file of files) {
-      if (file.includes('/migrations/')) continue;
+      if (file.split(sep).join('/').includes('/migrations/')) continue;
       if (!file.endsWith('.md')) continue; // fenced gbrain-cmd scan is markdown-only
-      const rel = relative('.', file);
+      const rel = relative('.', file).split(sep).join('/');
       const text = readFileSync(file, 'utf8');
       for (const block of text.matchAll(/```[a-z]*\n([\s\S]*?)```/g)) {
         for (const cmd of block[1].matchAll(/(?:^|[|&;(]\s*)gbrain\s+([a-z][a-z0-9-]*)/gm)) {

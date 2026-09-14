@@ -200,9 +200,15 @@ describe('whoami op contract', () => {
     }
   });
 
-  // Local stdio MCP (#4): remote stays true (fail-closed gates unchanged)
-  // but the transport tag lets whoami return identity instead of throwing.
-  test('stdio transport tag (remote=true, no auth) returns stdio identity shape', async () => {
+  // Local stdio MCP (fork issue #4 / upstream #1061): remote stays true
+  // (fail-closed gates unchanged) but the transport tag lets whoami answer
+  // instead of throwing unknown_transport.
+  //
+  // Shape note: this fork originally also returned user / source_id /
+  // takes_holders here. The v0.50.0.0 upstream sync adopted upstream's
+  // narrower shape — the OS account name has no business crossing an MCP
+  // pipe, and nothing consumed the other two.
+  test('stdio transport tag (remote=true, no auth) returns the stdio shape', async () => {
     const result = (await whoami.handler(
       ctxWith({
         remote: true,
@@ -214,13 +220,11 @@ describe('whoami op contract', () => {
       {},
     )) as any;
     expect(result.transport).toBe('stdio');
-    expect(typeof result.user).toBe('string');
-    expect(result.user.length).toBeGreaterThan(0);
-    expect(result.source_id).toBe('default');
-    expect(result.takes_holders).toEqual(['world']);
     // scopes MUST be [] (mirrors the 'local' shape) so hasScope([]) stays
     // false — the tag is identity, never a capability grant.
     expect(result.scopes).toEqual([]);
+    // Deliberately NOT reported over the pipe.
+    expect(result.user).toBeUndefined();
   });
 
   test('real auth beats the stdio tag (oauth shape returned)', async () => {

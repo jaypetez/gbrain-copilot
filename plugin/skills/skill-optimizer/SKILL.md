@@ -131,7 +131,7 @@ possible for very behavior-shaped skills), discard it and write the JSONL
 yourself: read the SKILL.md, write ~15 realistic tasks covering the boring middle,
 attach >=2 rule checks each, save to `skills/X/skillopt-benchmark.jsonl`, run with
 `--split 1:1:1`. The full walkthrough lives at
-https://github.com/garrytan/gbrain/blob/master/docs/tutorials/improving-skills-with-skillopt.md.
+https://github.com/jaypetez/gbrain-copilot/blob/main/docs/tutorials/improving-skills-with-skillopt.md.
 
 ## Decision tree
 

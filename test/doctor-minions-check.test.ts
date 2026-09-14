@@ -13,7 +13,7 @@
  * (the same seam test/doctor-behavioral.test.ts uses) under a withEnv-scoped
  * temp GBRAIN_HOME — the check reads completed.jsonl at call time through
  * gbrainPath(), so no subprocess is needed. Exit-code parity is exact:
- * runDoctor's verdict is computeDoctorReport(checks).status === 'unhealthy'
+ * runDoctor's verdict is computeExitCode(computeDoctorReport(checks))
  * ? 1 : 0 (doctor.ts:outputResults) and buildChecks receives the same args
  * the --fast CLI dispatch passes. Two real CLI spawns remain, each pinning a
  * path the seam can't reach:
@@ -28,7 +28,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { withEnv } from './helpers/with-env.ts';
 import { runCli } from './helpers/cli-spawn.ts';
-import { buildChecks, computeDoctorReport, type Check } from '../src/commands/doctor.ts';
+import { buildChecks, computeDoctorReport, computeExitCode, type Check } from '../src/commands/doctor.ts';
 import { getDbUrlSource } from '../src/core/config.ts';
 
 let tmp: string;
@@ -41,7 +41,8 @@ let tmp: string;
  * doctor runs filesystem-only (half-migrated checks need no DB). Sibling test
  * files' env mutations can't poison this: withEnv overrides GBRAIN_HOME for
  * the duration of the call instead of inheriting a leaked value. exitCode is
- * derived exactly the way runDoctor derives it (unhealthy → 1), and
+ * derived exactly the way runDoctor derives it (computeExitCode: 0 healthy,
+ * 1 warnings, 2 failures — the fork issue-#5 contract), and
  * getDbUrlSource() is computed inside the env scope, matching the --fast
  * dispatch in src/cli.ts.
  */
@@ -51,7 +52,7 @@ async function runFastChecks(): Promise<{ exitCode: number; checks: Check[] }> {
     async () => {
       const checks = await buildChecks(null, ['--fast', '--json'], getDbUrlSource());
       return {
-        exitCode: computeDoctorReport(checks).status === 'unhealthy' ? 1 : 0,
+        exitCode: computeExitCode(computeDoctorReport(checks)),
         checks,
       };
     },

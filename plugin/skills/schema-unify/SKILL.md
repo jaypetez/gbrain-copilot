@@ -266,6 +266,6 @@ For structured JSON, `gbrain call get_job '{"id": <id>}'` returns the job row; i
 
 ## Reference
 
-- Architecture: https://github.com/garrytan/gbrain/blob/master/docs/architecture/type-taxonomy.md
-- Pack-upgrade mechanism: https://github.com/garrytan/gbrain/blob/master/docs/architecture/pack-upgrade-mechanism.md
+- Architecture: https://github.com/jaypetez/gbrain-copilot/blob/main/docs/architecture/type-taxonomy.md
+- Pack-upgrade mechanism: https://github.com/jaypetez/gbrain-copilot/blob/main/docs/architecture/pack-upgrade-mechanism.md
 - Issue: https://github.com/garrytan/gbrain/issues/1479
