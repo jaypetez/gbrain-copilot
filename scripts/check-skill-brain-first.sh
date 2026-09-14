@@ -42,28 +42,25 @@ trap "rm -f \"$TMPOUT\"" EXIT
 
 GBRAIN_SKILLS_DIR="$ROOT/skills" bun run src/cli.ts doctor --fast --json >"$TMPOUT" 2>/dev/null || true
 
-# Extract the skill_brain_first check status. Use python3 (already a
-# repo-wide dependency via image-decoders + admin tooling) so we don't
-# add jq to the verify chain.
-STATUS=$(python3 -c "
-import json, sys
-with open('$TMPOUT') as fp:
-    for line in fp:
-        line = line.strip()
-        if not (line.startswith('{') and line.endswith('}')):
-            continue
-        try:
-            report = json.loads(line)
-        except Exception:
-            continue
-        for c in report.get('checks', []):
-            if c.get('name') == 'skill_brain_first':
-                print(c.get('status', 'missing'))
-                sys.exit(0)
-        print('missing')
-        sys.exit(0)
-print('parse_error')
-" 2>/dev/null || echo "parse_error")
+# Extract the skill_brain_first check status with bun — the runtime that
+# just ran doctor on the line above, so no extra dependency. (This used to
+# shell out to python3; on Windows hosts that is typically the Microsoft
+# Store stub, which emits nothing and made the guard report `parse_error`
+# for reasons unrelated to the skills being checked.)
+STATUS=$(DOCTOR_JSON="$TMPOUT" bun -e '
+const fs = require("fs");
+let out = "parse_error";
+for (const line of fs.readFileSync(process.env.DOCTOR_JSON, "utf8").split("\n")) {
+  const t = line.trim();
+  if (!(t.startsWith("{") && t.endsWith("}"))) continue;
+  let report;
+  try { report = JSON.parse(t); } catch { continue; }
+  const c = (report.checks ?? []).find(x => x && x.name === "skill_brain_first");
+  out = c ? (c.status ?? "missing") : "missing";
+  break;
+}
+process.stdout.write(out);
+' 2>/dev/null || echo "parse_error")
 
 case "$STATUS" in
   ok)

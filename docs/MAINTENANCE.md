@@ -63,13 +63,23 @@ and `upstream DISABLE (push)`.
 Treat every sync as a reviewed merge on its own branch.
 
 ```bash
+scripts/sync-upstream.sh            # how far behind are we? changes nothing
+scripts/sync-upstream.sh --merge    # branch + merge; leaves conflicts for you
+```
+
+The script wires the `upstream` remote (push disabled), then reports the fork
+point, how many commits each side is ahead, and — the number that predicts the
+work — **the set of files both sides touched**. Being 2 upstream releases behind
+is a 20-minute merge; the v0.42.37.0 → v0.50.0.0 sync was 748 commits, 71
+overlapping files, 41 real conflicts, and took a day.
+
+By hand, if you prefer:
+
+```bash
 git fetch upstream
 git checkout main && git pull                 # local main == origin/main
-# Review what you're behind on first:
 git log --oneline --no-merges main..upstream/master | head -50
-git diff --stat main upstream/master | tail -30
-
-git checkout -b sync/upstream-$(date +%Y-%m-%d)
+git checkout -b sync/upstream-<upstream-version>
 git merge upstream/master                      # conflicts are expected
 ```
 
@@ -95,6 +105,76 @@ Copilot packaging, so its version of these files is always wrong for the fork:
 
 **Everything else** — merge on the merits. Upstream's `src/` fixes and new tests
 are the whole point of tracking upstream.
+
+Three rules make "on the merits" concrete. They are ranked by how much future
+pain they save, and they came out of the v0.50.0.0 sync:
+
+1. **Where upstream independently landed the same fix, take upstream's.** Both
+   projects fix the same reported bugs. Upstream's version is usually a superset,
+   and taking it stops the file conflicting again on every future sync. That sync
+   retired four fork fixes this way: `whoami`'s stdio shape (upstream's returns
+   no OS account name), the Windows `serve` watchdog (upstream folded the
+   signal-0 probe into `readLiveParentPid` / `probeWatchdogAvailable`),
+   `postinstall` (Bun-native), and `jsonb_integrity` (`to_regclass` probe).
+
+2. **Where upstream peeled a function the fork had edited, port the fork's
+   behaviour into its new home.** Upstream refactors constantly — `operations.ts`
+   → `src/core/ops/*`, `doctor.ts` → `src/commands/doctor/checks/*`, both
+   engines → `src/core/{pglite,postgres}-engine/*`. Never resurrect the inline
+   copy: you end up with two, and which one wins depends on import order.
+
+3. **Keep genuinely fork-specific behaviour, and say so in a comment.** `gbrain
+   doctor`'s 0/1/2 exit contract stays — but implemented on whatever mechanism
+   upstream now uses, with a comment naming it as a fork delta so the next person
+   doesn't "fix" it back to upstream's 0/1. The same applies to the fresh-brain
+   demotions (`retrieval_reflex_health`, `ze_embedding_health`, embedding
+   coverage, `pack_upgrade_available`): every upstream merge reintroduces a
+   check that warns on a pristine brain and breaks the fresh-brain-exits-0
+   contract.
+
+### The coordinate sweep (do not skip)
+
+This is the step that breaks things **silently** if you skip it. Every merge
+brings new upstream code with `garrytan/gbrain` baked in. The highest-stakes one:
+
+> `src/core/binary-self-update.ts` verifies a downloaded binary against a GitHub
+> build-provenance attestation pinned to a specific repo and branch. Merged
+> as-is it pins `garrytan/gbrain@refs/heads/master` — so **every** self-update of
+> a fork-built binary fails its integrity check and refuses to install. On users'
+> machines, not in CI.
+
+```bash
+# Functional coordinates in source — these change runtime behaviour.
+grep -rn 'garrytan/gbrain' src/ --include=*.ts \
+  | grep -v 'UPSTREAM_REPO\|gbrain-evals\|gbrain-skillpack-registry'
+
+# Shipped docs/skills/scripts — CI-gated for the raw-URL class.
+bun run check:fork-hygiene
+```
+
+Fix by importing from `src/core/repo-coordinates.ts`, never by editing the
+literal. Beyond the files listed above, the recurring offenders are
+`check-update.ts` (version probe + release notes), `upgrade.ts` (install
+commands), `npm-squat-check.ts` (repo marker), the install hints in
+`bootstrap.ts` / `bootstrap/template-repo.ts` / `pglite-embedded-assets.ts` /
+`agent-install/state.ts`, and doc links in `harness/registry.ts`,
+`creds/errors.ts`, `serve-http.ts`, `schema-version-health.ts`.
+
+Do **not** rewrite `CHANGELOG.md` (historical record, and CI excludes it), the
+sibling repos `garrytan/gbrain-evals` and `garrytan/gbrain-skillpack-registry`,
+prose crediting upstream, or upstream issue numbers in comments (keep those as
+`upstream context: garrytan/gbrain#NNN`).
+
+### Versioning across a sync
+
+Fork releases use the upstream version they contain plus a fork `.MICRO`:
+upstream `0.50.0.0` + the first fork release on top → `0.50.0.1`. This keeps the
+version honest about which upstream is inside.
+
+> Before the syncs started, the fork drifted into issuing its own `0.42.39.0`
+> while upstream separately shipped a *different* `0.42.39.0`. Both survive in
+> `CHANGELOG.md`; the fork's entries are tagged `(gbrain-copilot fork)` to
+> disambiguate. Don't create more of those.
 
 ### After resolving
 
@@ -152,6 +232,21 @@ CI/guards. Regenerate the ones whose source you touched:
 
 **Rule of thumb:** any `CLAUDE.md` or reference-doc edit → `bun run build:llms`
 in the same change, or CI shard 1 fails.
+
+---
+
+## Push generic fixes upstream
+
+If a sync ever gets painful enough that you consider carrying a patch series
+instead of a merge, do the opposite: send the fork's non-fork-specific
+improvements upstream so there is less delta to carry. Anything that is not
+Copilot packaging, fork coordinates, or a deliberate fork behaviour is a
+candidate.
+
+The v0.50.0.1 sync produced three: Windows path normalization in
+`check-orphan-modules.mjs` and `check-skill-refs.mjs` (both compared backslash
+paths against `/`-separated literals and silently checked nothing), and
+`check-skill-brain-first.sh` parsing doctor's JSON with bun instead of python3.
 
 ---
 

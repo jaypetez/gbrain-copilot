@@ -37,6 +37,17 @@ export const PROJECT = {
 
 export const SECTIONS: DocSection[] = [
   {
+    heading: "Choose your agent setup",
+    entries: [
+      { title: "Grok Bot", path: "docs/guides/grok-bot.md", description: "Add repairable local memory inside Grok Bot, enable its native skill, or connect a hosted brain. Shared-computer trust and dated evidence." },
+      { title: "Muse personal agent", path: "docs/guides/muse.md", description: "Verify durable storage and add explicit memory with provenance alongside Muse's native memory; distinguish Muse Code and unverified native MCP." },
+      { title: "Inside an existing agent", path: "docs/guides/in-agent-setup.md", description: "Isolated setup, absolute launcher, receipts, keyless maintenance, complete private backup and safe restoration." },
+      { title: "Connect a hosted brain", path: "docs/guides/hosted-harness-access.md", description: "Host-side grants, private credential handoff, harness installation, profile repair, delegation limits and honest verification." },
+      { title: "Harness adapter reference", path: "docs/guides/harness-adapters.md", description: "Registry-generated transport, authentication lifetime and configuration facts.", includeInFull: false },
+      { title: "Harness validation evidence", path: "docs/guides/harness-validation.md", description: "Local lifecycle and HTTP/worker proof, reproducible tests, and the remaining actual-harness acceptance checks.", includeInFull: false },
+    ],
+  },
+  {
     heading: "Core entry points",
     entries: [
       {
@@ -171,9 +182,21 @@ export const SECTIONS: DocSection[] = [
         path: "docs/guides/push-context.md",
       },
       {
+        title: "docs/guides/github-source.md",
+        description:
+          "Mirror GitHub issues, PRs, comments, reviews and CI checks as brain pages. One key + one registration command to a searchable mirror; webhook-driven instant refresh, poll-sweep fallback, daily reconcile, App-credential option.",
+        path: "docs/guides/github-source.md",
+      },
+      {
         title: "docs/mcp/DEPLOY.md",
         description: "MCP server deployment.",
         path: "docs/mcp/DEPLOY.md",
+      },
+      {
+        title: "docs/protocol/MEMORY_VERBS_v1.md",
+        description:
+          "The frozen five-verb memory protocol (recall/remember/entity/synthesize/forget): response envelopes, error contract, additive-forever versioning, surface modes, conformance certification, per-harness installs.",
+        path: "docs/protocol/MEMORY_VERBS_v1.md",
       },
     ],
   },
@@ -183,7 +206,7 @@ export const SECTIONS: DocSection[] = [
       {
         title: "docs/ai-providers/zeroentropy.md",
         description:
-          "ZeroEntropy zembed-1 embedding + zerank-2 reranker (hosted): API key, embedding switch, reranker config.",
+          "ZeroEntropy (deprecated; hosted sunset 2026-09-04): the off-ramp for existing brains — migrate embeddings + reranker, self-host continuity, troubleshooting. Do not onboard.",
         path: "docs/ai-providers/zeroentropy.md",
         // Setup walkthrough — discoverable in the index, not inlined in the
         // single-fetch bundle (keeps llms-full.txt under FULL_SIZE_BUDGET).
@@ -237,7 +260,7 @@ export const SECTIONS: DocSection[] = [
       {
         title: "skills/migrations/",
         description:
-          "Per-version (v0.5.0 - v0.14.1) agent-executable migration instructions.",
+          "Per-version agent-executable migration instructions (latest: v0.49.0.0 — isolated agent setup, hosted grant migration, and verification).",
         path: "skills/migrations/",
       },
       {
@@ -301,6 +324,13 @@ export const SECTIONS: DocSection[] = [
         title: "docs/architecture/infra-layer.md",
         description: "Shared infra patterns.",
         path: "docs/architecture/infra-layer.md",
+        includeInFull: false,
+      },
+      {
+        title: "docs/memorable-agents.md",
+        description:
+          "Optional Memorable procedural-memory integration: the session-end receipt, the config gate and kill switch, the consent model, and exactly what leaves the machine.",
+        path: "docs/memorable-agents.md",
         includeInFull: false,
       },
     ],

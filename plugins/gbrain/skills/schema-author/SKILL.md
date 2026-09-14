@@ -69,9 +69,8 @@ flags). For these adjacent jobs, route elsewhere:
   already has a schema-check phase. Don't duplicate.
 - **Just looking up a type's settings** → `gbrain schema explain <type>`
   directly. This skill is for CHANGING the pack, not READING from it.
-- **Querying who knows about X** → `skills/expert-routing/SKILL.md` (or
-  `gbrain whoknows` directly). schema-author makes a type expert-routable;
-  it does not run the query.
+- **Querying who knows about X** → `gbrain whoknows <topic>` directly.
+  schema-author makes a type expert-routable; it does not run the query.
 
 ## Convention
 
@@ -94,8 +93,8 @@ DON'T invoke for "where does THIS note go" (use brain-taxonomist) or
 
 ## Tutorial + vision
 
-- **Why this matters:** [`docs/what-schemas-unlock.md`](../../docs/what-schemas-unlock.md) — 7 killer use cases (4000 invisible meetings made queryable, founder ops brain, research brain, legal brain, team brain, agent-as-co-curator) plus the structural argument for why types matter at query time. Read this before pitching schema authoring to a user — it's the doc that explains the difference between a pile of notes and a brain with structure.
-- **5-minute walkthrough:** [`docs/schema-author-tutorial.md`](../../docs/schema-author-tutorial.md) — fork the bundled pack, add a researcher type, sync, prove the T1.5 wiring via `gbrain whoknows`. Use placeholder pages so it runs against any brain without affecting real content.
+- **Why this matters:** [`docs/what-schemas-unlock.md`](https://github.com/jaypetez/gbrain-copilot/blob/main/docs/what-schemas-unlock.md) — 7 killer use cases (4000 invisible meetings made queryable, founder ops brain, research brain, legal brain, team brain, agent-as-co-curator) plus the structural argument for why types matter at query time. Read this before pitching schema authoring to a user — it's the doc that explains the difference between a pile of notes and a brain with structure.
+- **5-minute walkthrough:** [`docs/schema-author-tutorial.md`](https://github.com/jaypetez/gbrain-copilot/blob/main/docs/schema-author-tutorial.md) — fork the bundled pack, add a researcher type, sync, prove the T1.5 wiring via `gbrain whoknows`. Use placeholder pages so it runs against any brain without affecting real content.
 
 ## Workflow
 
@@ -120,7 +119,7 @@ declared prefixes with zero matching pages — probable mis-declarations).
 If coverage < 90%, there's untyped content worth typing.
 
 ```
-gbrain schema review-orphans --limit 50 --json
+gbrain schema review-orphans --json
 ```
 
 Untyped pages drilldown. Look for shared path prefixes (e.g. "12 of these
@@ -178,8 +177,9 @@ Validate before sync:
 gbrain schema lint --with-db
 ```
 
-The `--with-db` flag opts into the 2 DB-aware rules
-(`extractable_empty_corpus`, `mutation_count_anomaly`) that detect
+The `--with-db` flag opts into the 4 DB-aware rules
+(`extractable_empty_corpus`, `mutation_count_anomaly`,
+`stored_type_is_alias`, `stored_type_undeclared`) that detect
 mis-declared types you'd otherwise discover only at runtime.
 
 ### Phase 5 — Sync (backfill existing pages with the new types)
@@ -265,7 +265,7 @@ When invoked, this skill produces structured output suitable for both human + JS
 
 **Per-mutation result (JSON):**
 ```json
-{"schema_version": 1, "pack": "mine", "path": "/Users/.../pack.json", "format": "json", "prev_sha8": "a1b2c3d4", "new_sha8": "e5f6g7h8"}
+{"schema_version": 1, "pack": "mine", "path": "~/.gbrain/schema-packs/mine/pack.json", "format": "json", "prev_sha8": "a1b2c3d4", "new_sha8": "e5f6g7h8"}
 ```
 
 **Per-batch result (from `schema_apply_mutations` MCP op):**
@@ -288,7 +288,7 @@ When invoked, this skill produces structured output suitable for both human + JS
 - Stats: total pages, typed %, untyped count, per-type breakdown, dead-prefix list
 - Sync: per-prefix `would_apply`/`applied` count + sample slugs in dry-run mode
 
-On failure, the error envelope follows the standard `StructuredAgentError` shape from `src/core/errors.ts`: `{error, code, message, details?}`. Codes from the mutation primitives: `PACK_NOT_FOUND`, `PACK_READONLY`, `PACK_CORRUPT`, `TYPE_EXISTS`, `TYPE_NOT_FOUND`, `INVALID_PRIMITIVE`, `INVALID_RESULT`, `IO_ERROR`, `STILL_REFERENCED`, `LOCK_BUSY`.
+On failure, the error envelope follows the standard `StructuredAgentError` shape: `{error, code, message, details?}`. Codes from the mutation primitives: `PACK_NOT_FOUND`, `PACK_READONLY`, `PACK_CORRUPT`, `TYPE_EXISTS`, `TYPE_NOT_FOUND`, `INVALID_PRIMITIVE`, `INVALID_RESULT`, `IO_ERROR`, `STILL_REFERENCED`, `LOCK_BUSY`.
 
 ## Failure modes
 

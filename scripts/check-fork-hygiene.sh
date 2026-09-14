@@ -16,6 +16,10 @@
 #   3. Payload drift — plugins/gbrain/ is generated from skills/ + the
 #      gbrain agent by scripts/build-copilot-plugin.sh; a stale payload
 #      ships outdated skills to plugin installs.
+#   4. Default-branch drift — upstream is master, this fork is main. Merges
+#      reintroduce `branches: [master]` triggers and `origin/master`
+#      baseline refs, which fail late (a workflow that never fires, or a
+#      fetch of a nonexistent ref).
 #
 # Sibling to scripts/check-trailing-newline.sh per CLAUDE.md's CI guard
 # pattern. Wired into `bun run verify` via run-verify-parallel.sh.
@@ -93,6 +97,33 @@ if [ -d plugins/gbrain ]; then
     FAILED=1
   fi
 fi
+
+# ── Section 4: default-branch drift ────────────────────────────────────────
+# Upstream's default branch is master; this fork's is main. An upstream merge
+# reintroduces `branches: [master]` triggers and `origin/master` baseline
+# refs, which fail LATE and confusingly (a workflow that never triggers, or a
+# fetch of a ref that does not exist here). `upstream/master` is excluded —
+# that one genuinely means upstream's branch. sync-upstream.sh and this
+# file are excluded: both talk ABOUT the upstream branch by design.
+BRANCH_FILES=$(
+  git ls-files '.github/workflows/*.yml' '.github/workflows/*.yaml' \
+    'scripts/*.sh' 'scripts/*.ts' 'scripts/*.mjs' \
+  2>/dev/null | grep -vE '^scripts/(sync-upstream|check-fork-hygiene)\.sh$' | sort -u
+)
+
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  [ -f "$f" ] || continue
+  # Strip the legitimate upstream/master spelling before matching.
+  hits=$(sed 's|upstream/master||g' "$f" \
+    | grep -nE 'origin/master|refs/heads/master|branches:[[:space:]]*\[[[:space:]]*.?master' || true)
+  if [ -n "$hits" ]; then
+    echo "ERROR: upstream default-branch reference in $f:" >&2
+    printf '%s\n' "$hits" | sed 's|^|  |' >&2
+    echo "  This fork's default branch is main. Fix: s/master/main/ on the ref or trigger." >&2
+    FAILED=1
+  fi
+done <<< "$BRANCH_FILES"
 
 if [ "$FAILED" -eq 1 ]; then
   exit 1

@@ -14,10 +14,10 @@
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { withEnv } from './helpers/with-env.ts';
 import { checkHiddenBySearchPolicy } from '../src/commands/doctor.ts';
-import { configureGateway } from '../src/core/ai/gateway.ts';
 import { categorizeCheck } from '../src/core/doctor-categories.ts';
 import { buildQuarantineMarker } from '../src/core/quarantine.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
@@ -59,17 +59,22 @@ async function seed(
 }
 
 beforeAll(async () => {
-  // Pin the gateway to the legacy 1536-d shape BEFORE initSchema so the
-  // content_chunks.embedding column is vector(1536), matching this file's
-  // hardcoded basisEmbedding(1536) fixtures. Without this, a prior test in
-  // the same shard that configured a ZE/1280 gateway and didn't reset leaks
-  // into our beforeAll-time initSchema (which reads the global gateway before
-  // any beforeEach preload-restore fires), building a vector(1280) column and
-  // failing every insert with "expected 1280 dimensions, not 1536".
+  // Pin the embedding dim to 1536 BEFORE initSchema. basisEmbedding()
+  // hardcodes Float32Array(1536) vectors, but initSchema sizes vector
+  // columns from process-global gateway state (getEmbeddingDimensions(),
+  // default 1280 = zeroentropyai). Whether this file passes therefore
+  // depended on which test files happened to run before it in the shard: a
+  // predecessor that leaves the gateway configured without dims (or a bare
+  // CI env) yields vector(1280) and every upsertChunks here dies with
+  // "expected 1280 dimensions, not 1536". Adding test files to the repo
+  // reshuffles the weight-packed shards, so unrelated PRs trip it (seen on
+  // #2800 CI, test (1)). Same fix + rationale as
+  // engine-find-trajectory.test.ts and cosine-rescore-column.test.ts, which
+  // document this exact class.
   configureGateway({
     embedding_model: 'openai:text-embedding-3-large',
     embedding_dimensions: 1536,
-    env: { ...process.env },
+    env: { OPENAI_API_KEY: 'sk-test-hidden-by-search-policy' },
   });
   engine = new PGLiteEngine();
   await engine.connect({});
@@ -78,6 +83,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await engine.disconnect();
+  resetGateway();
 });
 
 beforeEach(async () => {
