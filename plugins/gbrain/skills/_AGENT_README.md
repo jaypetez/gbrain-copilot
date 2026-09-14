@@ -43,8 +43,31 @@ array. Substring match is the baseline. Semantic similarity (embedding or
 keyword expansion) is fine on top. When a trigger matches strongly, invoke the
 skill — read its SKILL.md body in full and follow the workflow described there.
 
-**Do NOT** look for a managed-block table inside `RESOLVER.md` or `AGENTS.md`.
-That pattern was retired in gbrain v0.36. Routing lives in frontmatter now.
+**The routing contract:** frontmatter `triggers:` are authoritative.
+`skills/RESOLVER.md` is the human-readable dispatch map of the same routing —
+useful for scanning every skill and its trigger phrases in one place, and it
+carries the disambiguation rules for overlapping matches. If the two disagree,
+frontmatter wins. (There is no machine-managed block inside `RESOLVER.md` or
+`AGENTS.md`; that pattern was retired.)
+
+## The memory loop
+
+Preserve the existing agent's identity, native memory, and unrelated instructions.
+Start with keyless recall and explicit remembering:
+
+1. Read relevant entity/project context before answering.
+2. Save facts the user explicitly asks to remember, with provenance and the
+   intended brain/source. Automatic capture is off until the user opts in.
+3. Read the stored record before correcting it, retire the old fact, and save
+   the correction. `forget` withdraws active memory; history and backups may remain.
+4. Verify with `recall`, `entity`, or `get_page` before claiming the change landed.
+
+After explicit automatic-capture opt-in, apply the bundled `signal-detector`
+contract to substantive messages. Delegation and paid enrichment require their
+own authority. Reading context, installing skills, or possessing an API key does
+not authorize capture. A chat-only request suppresses writes for that message.
+Native skill activation and recall in a new conversation need actual harness
+evidence; generating files alone establishes neither.
 
 ## When the user invokes a skill
 
@@ -105,7 +128,8 @@ accidental or you want to fully reset to gbrain's current bundle.
 
 ## Removing a scaffolded skill
 
-There is no `uninstall` command in v0.36. The files are yours.
+There is no `uninstall` command (`gbrain skillpack uninstall` exits with an
+error pointing here). The files are yours.
 
 ```bash
 rm -rf skills/<slug>
@@ -122,3 +146,22 @@ The single source of truth for the model is
 `docs/guides/skillpacks-as-scaffolding.md` in the gbrain repo. The skill
 files you scaffolded are the source of truth for individual skill behavior.
 This file (`_AGENT_README.md`) is the routing contract — keep it short.
+
+## Frontmatter contract notes
+
+- **`upstream: <donor-skill>@<short-sha>`** — the provenance pin: which
+  donor skill (by slug) and which commit of it this skill was ported from.
+  Multi-source ports pin every donor, either as a YAML list or plus-joined
+  (`upstream: skill-a@abc1234 + skill-b@def5678`). To resolve a drift or
+  behavior question, diff the current SKILL.md against the pinned source
+  commit — the pin is what makes that diff possible.
+- **Optional keys are omitted, not zeroed.** Omit `writes_to` entirely when
+  the skill writes no pages (an empty list implies "writes pages, nowhere",
+  which is a contradiction). `brain_first: exempt` is allowed only with an
+  adjacent comment justifying WHY the skill is exempt from the brain-first
+  lookup chain — an unexplained exemption is a conformance failure.
+- **`priority:` is NOT part of the routing contract.** Nothing in the routing
+  path consumes it — matching is substring-over-`triggers:` (see "Routing"
+  above), with `RESOLVER.md` disambiguation for overlaps. A `priority:` key is
+  inert; don't add one expecting it to reorder matches. Encode precedence in
+  trigger specificity and the resolver's disambiguation rules instead.

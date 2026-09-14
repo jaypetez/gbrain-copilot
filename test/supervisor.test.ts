@@ -1,10 +1,13 @@
-import { describe, it, expect, afterEach } from 'bun:test';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, chmodSync, mkdirSync, rmSync } from 'fs';
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { readSupervisorEvents, computeSupervisorAuditFilename } from '../src/core/minions/handlers/supervisor-audit.ts';
-import { calculateBackoffMs } from '../src/core/minions/supervisor.ts';
+import { calculateBackoffMs, resolveHardStopMaxCrashes, MinionSupervisor, type SupervisorEmission } from '../src/core/minions/supervisor.ts';
+import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { MinionQueue } from '../src/core/minions/queue.ts';
+import type { BrainEngine } from '../src/core/engine.ts';
 
 const TEST_PID_FILE = '/tmp/gbrain-supervisor-test.pid';
 
@@ -58,6 +61,16 @@ function spawnSupervisor(h: IntegrationHarness, overrides: Record<string, string
     SUP_HEALTH_INTERVAL_MS: '999999',   // effectively off
     ...overrides,
   };
+  // issue #1994: the soft crash budget now DEGRADES (retry-with-backoff) rather
+  // than permanently giving up; permanent give-up fires at a much-higher hard
+  // ceiling (maxCrashes × 10). These integration tests assert the give-up
+  // LIFECYCLE (audit events, exit code, pidfile cleanup), so pin the hard
+  // ceiling to the soft budget by default — the degraded path is unit-tested in
+  // child-worker-supervisor.test.ts. Tests that want true degraded behavior
+  // pass GBRAIN_SUPERVISOR_HARD_STOP_CRASHES explicitly.
+  if (env.GBRAIN_SUPERVISOR_HARD_STOP_CRASHES === undefined) {
+    env.GBRAIN_SUPERVISOR_HARD_STOP_CRASHES = env.SUP_MAX_CRASHES;
+  }
 
   const child = spawn('bun', [join(import.meta.dir, 'fixtures/supervisor-runner.ts')], {
     env,
@@ -104,6 +117,31 @@ async function waitFor(pred: () => boolean, timeoutMs: number, tickMs = 20): Pro
 }
 
 describe('MinionSupervisor', () => {
+  describe('resolveHardStopMaxCrashes (issue #1994)', () => {
+    const KEY = 'GBRAIN_SUPERVISOR_HARD_STOP_CRASHES';
+    afterEach(() => { delete process.env[KEY]; });
+
+    it('defaults to maxCrashes × 10 when no override', () => {
+      delete process.env[KEY];
+      expect(resolveHardStopMaxCrashes(10)).toBe(100);
+      expect(resolveHardStopMaxCrashes(3)).toBe(30);
+    });
+
+    it('honors a valid non-negative integer override', () => {
+      process.env[KEY] = '0'; // 0 = disable permanent give-up
+      expect(resolveHardStopMaxCrashes(10)).toBe(0);
+      process.env[KEY] = '5';
+      expect(resolveHardStopMaxCrashes(10)).toBe(5);
+    });
+
+    it('ignores a negative or non-integer override (falls back to default)', () => {
+      process.env[KEY] = '-1';
+      expect(resolveHardStopMaxCrashes(10)).toBe(100);
+      process.env[KEY] = 'abc';
+      expect(resolveHardStopMaxCrashes(10)).toBe(100);
+    });
+  });
+
   describe('calculateBackoffMs', () => {
     it('returns ~1s for first crash', () => {
       const backoff = calculateBackoffMs(0);
@@ -197,6 +235,8 @@ describe('MinionSupervisor', () => {
       // hit max-crashes, then exit via shutdown() with code 1.
       const h = makeHarness('max-crashes', 'exit 1');
       try {
+        // hard ceiling defaults to SUP_MAX_CRASHES in the harness (see
+        // spawnSupervisor) so this give-up lifecycle still fires at 3 (#1994).
         const sup = spawnSupervisor(h, { SUP_MAX_CRASHES: '3' });
         const { code } = await sup.exited;
 
@@ -471,6 +511,136 @@ describe('MinionSupervisor', () => {
         h.cleanup();
       }
     }, 15_000);
+  });
+
+  // Private-queue startup recovery hook (beforeSpawn seam into
+  // ChildWorkerSupervisor). Constructed in-process with a real/throwing engine
+  // — the hook never spawns anything, so no supervisor-runner fixture needed.
+  describe('reconcileOrphanedPrivateQueuesBeforeWorkerSpawn', () => {
+    let engine: PGLiteEngine;
+    let queue: MinionQueue;
+    let queueSeq = 0;
+
+    beforeAll(async () => {
+      engine = new PGLiteEngine();
+      await engine.connect({ database_url: '' }); // in-memory
+      await engine.initSchema();
+      queue = new MinionQueue(engine);
+    }, 120_000);
+
+    afterAll(async () => {
+      await engine.disconnect();
+    });
+
+    beforeEach(async () => {
+      // Targeted DELETE preserves the `config.version` key MinionQueue's
+      // ensureSchema requires (full resetPgliteState wipes it).
+      await engine.executeRaw('DELETE FROM minion_jobs');
+    });
+
+    function makeSupervisor(eng: BrainEngine, emissions: SupervisorEmission[]): MinionSupervisor {
+      return new MinionSupervisor(eng, {
+        cliPath: '/bin/false', // never spawned — the hook is called directly
+        json: true,
+        onEvent: (e) => emissions.push(e),
+      });
+    }
+
+    /** Orphan fixture: waiting 'subagent' child, terminal owner, aged updated_at. */
+    async function seedOrphanQueue(): Promise<number> {
+      const queueName = `dream-inline-sup-recovery-${++queueSeq}`;
+      const owner = await queue.add('autopilot-cycle', {});
+      await engine.executeRaw(
+        `UPDATE minion_jobs SET status = 'completed', finished_at = now() WHERE id = $1`,
+        [owner.id],
+      );
+      const child = await queue.add(
+        'subagent',
+        { prompt: 'orphan fixture' },
+        {
+          queue: queueName,
+          private_queue_owner_job_id: owner.id,
+          private_queue_owner_token: 'sup-recovery-token',
+          private_queue_lease_ms: 600_000,
+        },
+        { allowProtectedSubmit: true },
+      );
+      await engine.executeRaw(
+        `UPDATE minion_jobs SET updated_at = now() - interval '5 minutes' WHERE id = $1`,
+        [child.id],
+      );
+      return child.id;
+    }
+
+    it("cancels an orphaned queue and emits health_warn reason='private_queue_startup_recovery'", async () => {
+      const childId = await seedOrphanQueue();
+      const emissions: SupervisorEmission[] = [];
+      const sup = makeSupervisor(engine, emissions);
+
+      await (sup as unknown as {
+        reconcileOrphanedPrivateQueuesBeforeWorkerSpawn: () => Promise<void>;
+      }).reconcileOrphanedPrivateQueuesBeforeWorkerSpawn();
+
+      const rows = await engine.executeRaw<{ status: string; error_text: string | null }>(
+        `SELECT status, error_text FROM minion_jobs WHERE id = $1`,
+        [childId],
+      );
+      expect(rows[0]!.status).toBe('cancelled');
+      expect(rows[0]!.error_text).toContain('supervisor startup recovery');
+
+      const warn = emissions.find(
+        (e) => e.event === 'health_warn' &&
+          (e as Record<string, unknown>).reason === 'private_queue_startup_recovery',
+      ) as Record<string, unknown> | undefined;
+      expect(warn).toBeDefined();
+      expect(warn!.cancelled_jobs).toBe(1);
+      expect(warn!.cancelled_queues).toBe(1);
+    });
+
+    it("resolves and emits health_warn reason='private_queue_startup_recovery_failed' when the engine throws", async () => {
+      const throwingEngine = {
+        executeRaw: async () => {
+          throw new Error('injected executeRaw failure');
+        },
+      } as unknown as BrainEngine;
+      const emissions: SupervisorEmission[] = [];
+      const sup = makeSupervisor(throwingEngine, emissions);
+
+      await expect(
+        (sup as unknown as {
+          reconcileOrphanedPrivateQueuesBeforeWorkerSpawn: () => Promise<void>;
+        }).reconcileOrphanedPrivateQueuesBeforeWorkerSpawn(),
+      ).resolves.toBeUndefined();
+
+      const warn = emissions.find(
+        (e) => e.event === 'health_warn' &&
+          (e as Record<string, unknown>).reason === 'private_queue_startup_recovery_failed',
+      ) as Record<string, unknown> | undefined;
+      expect(warn).toBeDefined();
+      expect(String(warn!.error)).toContain('injected executeRaw failure');
+    });
+
+  });
+
+  // Structural (separate suite so the behavioral recovery tests above stay
+  // classified behavioral; binding name is deliberately non-generic so the
+  // classifier's reference heuristic can't leak onto sibling suites).
+  describe('recovery hook timeout bound (structural)', () => {
+    it('the hook bounds recovery in a Promise.race with a 30_000ms timeout', () => {
+      // A hanging DB call here would otherwise block EVERY worker respawn
+      // (the beforeSpawn await is not isStopping-checked mid-flight).
+      const supervisorSource = readFileSync(
+        join(import.meta.dir, '..', 'src', 'core', 'minions', 'supervisor.ts'),
+        'utf8',
+      );
+      const hookStart = supervisorSource.indexOf('reconcileOrphanedPrivateQueuesBeforeWorkerSpawn');
+      expect(hookStart).toBeGreaterThan(-1);
+      const hookEnd = supervisorSource.indexOf('private async shutdown(');
+      expect(hookEnd).toBeGreaterThan(hookStart);
+      const body = supervisorSource.slice(hookStart, hookEnd);
+      expect(body).toContain('Promise.race');
+      expect(body).toContain('30_000');
+    });
   });
 
   describe('integration: audit file rotation + helper', () => {

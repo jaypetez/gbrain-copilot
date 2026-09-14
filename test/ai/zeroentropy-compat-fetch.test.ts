@@ -36,9 +36,12 @@ describe('zeroEntropyCompatFetch — shim structural shape', () => {
     // fetch` the function-arrow type loses Bun's `preconnect` method
     // signature. Pinning here prevents a future refactor from removing
     // the cast and re-introducing the tsc TS2741 failure documented in
-    // gateway.ts:556 comments.
+    // gateway.ts:556 comments. (Window is 9000 chars because the
+    // `warnSunsetOnce` block, the post-sunset short-circuit helpers AND the
+    // v0.48.2 `noKeyOnce` no_key audit helper sit between the last shim
+    // cast and `resolveEmbeddingProvider`.)
     const src = await Bun.file(GATEWAY_PATH).text();
-    expect(src).toMatch(/\}\)\s*as unknown as typeof fetch;[\s\S]{0,200}async function resolveEmbeddingProvider/);
+    expect(src).toMatch(/\}\)\s*as unknown as typeof fetch;[\s\S]{0,9000}async function resolveEmbeddingProvider/);
   });
 
   test('URL rewrite: /embeddings → /models/embed (CDX1-F2)', async () => {
@@ -53,13 +56,15 @@ describe('zeroEntropyCompatFetch — shim structural shape', () => {
     expect(src).not.toContain('/v1/v1/');
   });
 
-  test('body injects input_type default "document"', async () => {
+  test('body recovers threaded input_type, defaulting to "document"', async () => {
     const src = await Bun.file(GATEWAY_PATH).text();
-    // The wrapper defaults input_type to 'document' when caller didn't
-    // thread one (matches the document-side correctness for sync /
-    // import / embed CLI paths).
+    // The wrapper recovers the SDK-stripped input_type from
+    // __embedInputTypeStore (#1400) and still defaults to 'document' when
+    // no caller threaded one (document-side correctness for sync / import /
+    // embed CLI paths). Wire-level behavioral coverage lives in
+    // test/embed-input-type-wire.test.ts.
     expect(src).toMatch(/parsed\.input_type\s*===\s*undefined/);
-    expect(src).toMatch(/parsed\.input_type\s*=\s*['"]document['"]/);
+    expect(src).toMatch(/parsed\.input_type\s*=\s*__embedInputTypeStore\.getStore\(\)\s*\?\?\s*['"]document['"]/);
   });
 
   test('body forces encoding_format=float (CDX2-F2)', async () => {

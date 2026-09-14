@@ -28,7 +28,7 @@ import { importCodeFile } from '../core/import-file.ts';
 import { estimateTokens } from '../core/chunkers/code.ts';
 import { getEmbeddingModelName, estimateEmbeddingCostUsd } from '../core/embedding.ts';
 import { errorFor, serializeError } from '../core/errors.ts';
-import { createInterface } from 'readline';
+import { promptYesNo } from '../core/confirm-prompt.ts';
 import { createProgress } from '../core/progress.ts';
 import { getCliOptions, cliOptsToProgressOptions } from '../core/cli-options.ts';
 import { BudgetTracker, BudgetExhausted } from '../core/budget/budget-tracker.ts';
@@ -120,6 +120,7 @@ function printCodeModelNudge(decision: Extract<NudgeDecision, { shouldNudge: tru
 
 interface CodePageRow {
   slug: string;
+  source_id: string;
   compiled_truth: string;
   frontmatter: Record<string, unknown> | null;
 }
@@ -133,8 +134,13 @@ async function fetchCodePages(
   // Direct SQL: listPages doesn't expose source_id filtering, and we need
   // compiled_truth + frontmatter anyway (not just the Page shape).
   const sourceClause = sourceId ? `AND p.source_id = '${sourceId.replace(/'/g, "''")}'` : '';
+  // source_id is SELECTed so the per-page re-import below targets each row's
+  // OWN source. Pre-fix this iterated all sources' code pages but imported
+  // with the CLI-level sourceId (undefined without --source), which — now
+  // that import reads/writes are default-scoped — would duplicate every
+  // non-default-source code page into 'default' and re-embed it.
   const rows = await engine.executeRaw<CodePageRow>(
-    `SELECT p.slug, p.compiled_truth, p.frontmatter
+    `SELECT p.slug, p.source_id, p.compiled_truth, p.frontmatter
      FROM pages p
      WHERE p.type = 'code' ${sourceClause}
      ORDER BY p.slug
@@ -178,18 +184,6 @@ async function estimateReindexCost(
     if (batch.length < batchSize) break;
   }
   return { totalTokens, totalPages };
-}
-
-async function promptYesNo(question: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(question, (answer) => {
-      rl.close();
-      const a = answer.trim().toLowerCase();
-      resolve(a === 'y' || a === 'yes');
-    });
-    rl.on('close', () => resolve(false));
-  });
 }
 
 export async function runReindexCode(
@@ -289,7 +283,10 @@ export async function runReindexCode(
               reporter.tick();
               return;
             }
-            if (!row.compiled_truth) {
+            // `compiled_truth` is NOT NULL DEFAULT '': an empty file is legitimately '' (every
+            // `__init__.py`). Only a null row is missing; the falsy check counted every empty
+            // file as a failure (#4902).
+            if (row.compiled_truth == null) {
               failed++;
               failures.push({ slug: row.slug, error: 'missing compiled_truth' });
               reporter.tick();
@@ -299,7 +296,10 @@ export async function runReindexCode(
               const result = await importCodeFile(engine, relPath, row.compiled_truth, {
                 noEmbed: opts.noEmbed,
                 force: opts.force,
-                sourceId: opts.sourceId,
+                // Each page re-imports into its OWN source (row-level), not
+                // the CLI-level default — reindex must be an in-place
+                // rebuild, never a cross-source copy.
+                sourceId: row.source_id,
               });
               if (result.status === 'imported') reindexed++;
               else if (result.status === 'skipped') skipped++;
@@ -416,6 +416,26 @@ export function buildCostRefusal(opts: {
 }
 
 /**
+ * issue #3970 — recovery hint for the "0 reindexed, N skipped" wall. Without
+ * --force, importCodeFile's content_hash short-circuit skips every unchanged
+ * page, so a user trying to backfill symbol metadata (or re-embed) sees an
+ * all-skipped pass with no pointer at the cure. Pure + exported for tests.
+ * Returns null when the hint doesn't apply (something reindexed, nothing
+ * skipped, or --force already passed).
+ */
+export function reindexForceHint(
+  result: Pick<ReindexCodeResult, 'reindexed' | 'skipped'>,
+  force: boolean | undefined,
+): string | null {
+  if (force || result.reindexed > 0 || result.skipped === 0) return null;
+  return (
+    `All ${result.skipped} page(s) were skipped by the content_hash short-circuit ` +
+    `(content unchanged since last index). To force a full re-chunk + re-embed pass ` +
+    `(e.g. to backfill symbol metadata), re-run with --force.`
+  );
+}
+
+/**
  * CLI entrypoint. Parses argv, wires cost-preview gate + JSON/TTY branching,
  * delegates to runReindexCode. Exit codes: 0 on success/dry-run, 2 on
  * ConfirmationRequired (matches sync --all), 1 on runtime error.
@@ -444,14 +464,24 @@ export async function runReindexCodeCli(engine: BrainEngine, args: string[]): Pr
   }
 
   // F3: --max-cost / --max-cost-usd both accepted for symmetry with brainstorm.
+  // v0.42.42.0 (#2139): `off`/`unlimited`/`none` → no runtime cap AND an explicit
+  // "cost isn't the constraint" decision that proceeds past the confirmation gate
+  // (like --yes). Numeric must be positive; `0`/garbage is rejected.
   let maxCostUsd: number | undefined;
+  let maxCostOff = false;
   for (const flag of ['--max-cost', '--max-cost-usd']) {
     const idx = args.indexOf(flag);
     if (idx >= 0) {
       const v = args[idx + 1];
+      const t = (v ?? '').trim().toLowerCase();
+      if (['off', 'unlimited', 'none'].includes(t)) {
+        maxCostUsd = undefined; // no runtime cap (reindex skips the tracker when unset)
+        maxCostOff = true;
+        break;
+      }
       const n = v ? parseFloat(v) : NaN;
       if (!Number.isFinite(n) || n <= 0) {
-        console.error(`gbrain reindex --code: ${flag} requires a positive number in USD (got ${v ?? '(missing)'})`);
+        console.error(`gbrain reindex --code: ${flag} requires a positive number in USD, or off/unlimited (got ${v ?? '(missing)'})`);
         process.exit(2);
       }
       maxCostUsd = n;
@@ -493,20 +523,36 @@ export async function runReindexCodeCli(engine: BrainEngine, args: string[]): Pr
     }
 
     if (!yes) {
-      const isTTY = Boolean(process.stdout.isTTY) && Boolean(process.stdin.isTTY);
-      if (!isTTY || json) {
-        // Guardrail unchanged: refuse + exit 2, no spend. Only the FORMAT splits
-        // on --json now (human refusal on stderr otherwise) — #1784.
-        const refusal = buildCostRefusal({ json, previewMsg, preview, costUsd, model: getEmbeddingModelName() });
-        if (refusal.stdout) console.log(refusal.stdout);
-        if (refusal.stderr) console.error(refusal.stderr);
-        process.exit(2);
-      }
-      console.log(previewMsg);
-      const answer = await promptYesNo('Proceed? [y/N] ');
-      if (!answer) {
-        console.log('Cancelled.');
-        return;
+      // v0.42.42.0 (#2139): spend.posture=tokenmax makes the gate informational
+      // — print the estimate and proceed (the operator declared cost isn't the
+      // constraint). The spend is still ledgered by the runtime BudgetTracker.
+      const { resolveSpendPosture } = await import('../core/spend-posture.ts');
+      const posture = await resolveSpendPosture(engine);
+      // An explicit `--max-cost off` is the same "cost isn't the constraint"
+      // signal as spend.posture=tokenmax — proceed past the confirmation gate.
+      if (posture === 'tokenmax' || maxCostOff) {
+        const gate = maxCostOff ? 'max_cost_off' : 'posture_tokenmax';
+        if (json) {
+          console.log(JSON.stringify({ status: 'proceeding', gate, codePages: preview.totalPages, totalTokens: preview.totalTokens, costUsd, model: getEmbeddingModelName() }));
+        } else {
+          console.log(`${previewMsg} ${maxCostOff ? '--max-cost off' : 'spend.posture=tokenmax'}: proceeding (informational). docs: docs/operations/spend-controls.md`);
+        }
+      } else {
+        const isTTY = Boolean(process.stdout.isTTY) && Boolean(process.stdin.isTTY);
+        if (!isTTY || json) {
+          // Guardrail unchanged: refuse + exit 2, no spend. Only the FORMAT splits
+          // on --json now (human refusal on stderr otherwise) — #1784.
+          const refusal = buildCostRefusal({ json, previewMsg, preview, costUsd, model: getEmbeddingModelName() });
+          if (refusal.stdout) console.log(refusal.stdout);
+          if (refusal.stderr) console.error(refusal.stderr);
+          process.exit(2);
+        }
+        console.log(previewMsg);
+        const answer = await promptYesNo('Proceed? [y/N] ');
+        if (!answer) {
+          console.log('Cancelled.');
+          return;
+        }
       }
     }
   }
@@ -520,6 +566,10 @@ export async function runReindexCodeCli(engine: BrainEngine, args: string[]): Pr
         `(${result.codePages} total code pages, ~${result.totalTokens.toLocaleString()} tokens, ` +
         `est. $${result.costUsd.toFixed(2)}).`,
     );
+    // #3970: an all-skipped pass without --force is usually someone trying to
+    // heal missing chunk metadata — point at the flag that actually does it.
+    const hint = reindexForceHint(result, force);
+    if (hint) console.log(hint);
     if (result.failures && result.failures.length > 0) {
       console.log(`\n${result.failures.length} failure(s):`);
       for (const f of result.failures.slice(0, 10)) {

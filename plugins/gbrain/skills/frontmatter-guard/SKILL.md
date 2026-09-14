@@ -36,7 +36,7 @@ Brain pages pile up over months. Agents write them with malformed frontmatter:
 - Unstructured YAML in meeting pages (ingestion bugs)
 - Slug mismatches (path renames not propagated)
 - Null bytes (binary corruption from copy-paste accidents)
-- Nested double quotes in titles (`title: "Phil "Nick" Last"`)
+- Nested double quotes in titles (`title: "Alice "Ace" Example"`)
 
 Without a guard, these accumulate silently until `gbrain sync` chokes or search returns garbage. The guard makes the failure visible at audit time and trivially fixable.
 
@@ -124,7 +124,7 @@ When the user says any of these, route here:
 
 - `gbrain doctor` — the `frontmatter_integrity` subcheck reports the same counts as `audit`.
 - `skills/maintain/SKILL.md` — broader brain health audit; chain after this skill if other classes of issue are suspected.
-- `skills/lint/SKILL.md` (via `gbrain lint`) — overlapping rules for skill-file lint; the `frontmatter-*` rule names in lint output come from this skill's validation surface.
+- `gbrain lint` — overlapping rules for skill-file lint (a CLI command, not a skill); the `frontmatter-*` rule names in lint output come from this skill's validation surface.
 
 ## Output Format
 

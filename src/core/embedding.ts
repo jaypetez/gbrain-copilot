@@ -123,10 +123,6 @@ export function getEmbeddingDimensions(): number {
   return gatewayGetDims();
 }
 
-// Back-compat exports for tests that imported these from v0.13.
-export const EMBEDDING_MODEL = 'text-embedding-3-large';
-export const EMBEDDING_DIMENSIONS = 1536;
-
 /**
  * USD cost per 1k tokens for text-embedding-3-large. Retained for back-compat
  * with callers/tests that import it directly; new cost math resolves the
@@ -172,14 +168,17 @@ export function estimateEmbeddingCostUsd(tokens: number): number {
  * already tracked per-page via `pages.chunker_version` (used by sync +
  * doctor). This signature is strictly about the EMBEDDING space.
  *
- * Falls back to the OpenAI default signature when the gateway is
- * unconfigured (unit-test context), matching the other estimator fallbacks.
+ * Returns null when the gateway is unconfigured. The old fallback silently
+ * claimed the OpenAI default signature, which STAMPED A LIE onto pages
+ * embedded in a gateway-less context — a wrong signature is worse than none
+ * (NULL = "unknown provenance", which the includeNullSignature machinery
+ * already handles honestly). Callers skip stamping/signature-widening on null.
  */
-export function currentEmbeddingSignature(): string {
+export function currentEmbeddingSignature(): string | null {
   try {
     return `${gatewayGetModel()}:${gatewayGetDims()}`;
   } catch {
-    return `${EMBEDDING_MODEL}:${EMBEDDING_DIMENSIONS}`;
+    return null;
   }
 }
 
@@ -194,9 +193,9 @@ export function currentEmbeddingSignature(): string {
 export type SyncEmbedMode = 'deferred' | 'inline';
 
 /**
- * Resolve the embed mode from the same three signals sync.ts uses to
- * compute `effectiveNoEmbed`. Single source of truth so the cost gate and
- * the actual embed decision can never drift.
+ * Resolve the embed mode from the original public v2/serial contract.
+ * `./embedding` is a package export, so keep this call shape stable for
+ * downstream TypeScript and JavaScript consumers.
  *
  *   effectiveNoEmbed = v2Enabled && !serialFlag && !noEmbed ? true : noEmbed
  *
@@ -217,17 +216,33 @@ export function willEmbedSynchronously(opts: {
   return effectiveNoEmbed ? 'deferred' : 'inline';
 }
 
+/** Internal worker-capability-aware mode used by the sync command boundary. */
+export function resolveWorkerBackedSyncEmbedMode(opts: {
+  deferEligible: boolean;
+  noEmbed: boolean;
+}): SyncEmbedMode {
+  const effectiveNoEmbed = opts.deferEligible || opts.noEmbed;
+  return effectiveNoEmbed ? 'deferred' : 'inline';
+}
+
 /**
- * Pure cost-gate decision. The gate BLOCKS (prompt in TTY, exit 2 envelope
- * in non-TTY) only when embed runs inline AND the estimated spend exceeds
- * the floor. Deferred mode NEVER blocks — the backfill cap is the real
- * money gate, and blocking the cheap markdown import for cost the import
- * doesn't synchronously incur is the bug this fix removes.
+ * Pure cost-gate decision. The gate BLOCKS (prompt in TTY, auto-defer in
+ * non-TTY) only when embed runs inline AND the estimated spend exceeds the
+ * floor. Deferred mode NEVER blocks — the backfill cap is the real money gate,
+ * and blocking the cheap markdown import for cost the import doesn't
+ * synchronously incur is the bug this fix removes.
+ *
+ * v0.42.42.0 (#2139): `spend.posture=tokenmax` makes the gate INFORMATIONAL —
+ * the operator has declared cost isn't the constraint, so it never blocks
+ * (the caller prints the estimate and proceeds inline). An `off`/`unlimited`
+ * floor (Infinity) is likewise never exceeded.
  */
 export function shouldBlockSync(
   costUsd: number,
   floorUsd: number,
   mode: SyncEmbedMode,
+  posture: 'gated' | 'tokenmax' = 'gated',
 ): boolean {
+  if (posture === 'tokenmax') return false;
   return mode === 'inline' && costUsd > floorUsd;
 }

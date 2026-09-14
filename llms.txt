@@ -4,6 +4,15 @@
 
 Repo: https://github.com/jaypetez/gbrain-copilot
 
+## Choose your agent setup
+
+- [Grok Bot](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/grok-bot.md): Add repairable local memory inside Grok Bot, enable its native skill, or connect a hosted brain. Shared-computer trust and dated evidence.
+- [Muse personal agent](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/muse.md): Verify durable storage and add explicit memory with provenance alongside Muse's native memory; distinguish Muse Code and unverified native MCP.
+- [Inside an existing agent](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/in-agent-setup.md): Isolated setup, absolute launcher, receipts, keyless maintenance, complete private backup and safe restoration.
+- [Connect a hosted brain](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/hosted-harness-access.md): Host-side grants, private credential handoff, harness installation, profile repair, delegation limits and honest verification.
+- [Harness adapter reference](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/harness-adapters.md): Registry-generated transport, authentication lifetime and configuration facts.
+- [Harness validation evidence](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/harness-validation.md): Local lifecycle and HTTP/worker proof, reproducible tests, and the remaining actual-harness acceptance checks.
+
 ## Core entry points
 
 - [AGENTS.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/AGENTS.md): Start here if you are not Claude Code. Install order, trust boundary, skill resolver, config/debug/migration pointers.
@@ -27,11 +36,14 @@ Repo: https://github.com/jaypetez/gbrain-copilot
 - [docs/guides/minions-deployment.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/minions-deployment.md): Deploying the gbrain jobs worker: crontab + watchdog, inline --follow, systemd/Procfile/fly.toml, upgrade checklist.
 - [docs/guides/quiet-hours.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/quiet-hours.md): Notification hold + timezone-aware delivery.
 - [docs/guides/scaling-skills.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/scaling-skills.md): Three-tier architecture for agents with 300+ skills: always-loaded, resolver-routed, and dormant. Per-turn token math, the v0.41.7.0 compact list-format resolver, and the `gbrain doctor` safety net. 306 skills, ~21K tokens freed per turn, zero capability loss.
+- [docs/guides/push-context.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/push-context.md): Push-based context: the brain volunteers confidence-gated pages from the rolling conversation window. Three channels (ambient reflex, volunteer_context op, gbrain watch), config knobs, and the volunteered-vs-used feedback loop.
+- [docs/guides/github-source.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/guides/github-source.md): Mirror GitHub issues, PRs, comments, reviews and CI checks as brain pages. One key + one registration command to a searchable mirror; webhook-driven instant refresh, poll-sweep fallback, daily reconcile, App-credential option.
 - [docs/mcp/DEPLOY.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/mcp/DEPLOY.md): MCP server deployment.
+- [docs/protocol/MEMORY_VERBS_v1.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/protocol/MEMORY_VERBS_v1.md): The frozen five-verb memory protocol (recall/remember/entity/synthesize/forget): response envelopes, error contract, additive-forever versioning, surface modes, conformance certification, per-harness installs.
 
 ## AI providers
 
-- [docs/ai-providers/zeroentropy.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/ai-providers/zeroentropy.md): ZeroEntropy zembed-1 embedding + zerank-2 reranker (hosted): API key, embedding switch, reranker config.
+- [docs/ai-providers/zeroentropy.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/ai-providers/zeroentropy.md): ZeroEntropy (deprecated; hosted sunset 2026-09-04): the off-ramp for existing brains — migrate embeddings + reranker, self-host continuity, troubleshooting. Do not onboard.
 - [docs/ai-providers/llama-server-reranker.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/ai-providers/llama-server-reranker.md): Local reranker via llama.cpp --reranking: Qwen3-Reranker or self-hosted ZE weights, --alias setup, gbrain config keys, cold-start timeout, budget-cap interaction.
 
 ## Debugging
@@ -43,7 +55,7 @@ Repo: https://github.com/jaypetez/gbrain-copilot
 ## Migrations
 
 - [docs/UPGRADING_DOWNSTREAM_AGENTS.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/UPGRADING_DOWNSTREAM_AGENTS.md): Patches for downstream agent skill forks. One section per release.
-- [skills/migrations/](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/skills/migrations/): Per-version (v0.5.0 - v0.14.1) agent-executable migration instructions.
+- [skills/migrations/](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/skills/migrations/): Per-version agent-executable migration instructions (latest: v0.49.0.0 — isolated agent setup, hosted grant migration, and verification).
 - [CHANGELOG.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/CHANGELOG.md): Release-summary voice + itemized changes + self-repair block per version.
 
 ## Contributing
@@ -60,6 +72,7 @@ Repo: https://github.com/jaypetez/gbrain-copilot
 
 - [docs/designs/](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/designs/): Forward-looking designs.
 - [docs/architecture/infra-layer.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/architecture/infra-layer.md): Shared infra patterns.
+- [docs/memorable-agents.md](https://raw.githubusercontent.com/jaypetez/gbrain-copilot/main/docs/memorable-agents.md): Optional Memorable procedural-memory integration: the session-end receipt, the config gate and kill switch, the consent model, and exactly what leaves the machine.
 
 ## Operational tips
 

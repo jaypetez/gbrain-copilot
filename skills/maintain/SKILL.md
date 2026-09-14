@@ -1,6 +1,7 @@
 ---
 name: maintain
-version: 1.0.0
+version: 1.1.0
+upstream: maintain@fc834ee
 description: |
   Brain health checks: back-link enforcement, citation audit, filing validation,
   stale info detection, orphan pages, and benchmarks. Use when asked to check
@@ -17,6 +18,8 @@ triggers:
   - "populate links"
   - "backfill graph"
   - "extract timeline entries"
+  - "retriage the backlog"
+  - "re-score the triage"
   - "run dream"
   - "process today's session"
   - "process yesterday's transcripts"
@@ -115,7 +118,8 @@ gbrain extract timeline --dir ~/brain
 
 ### Dream cycle (v0.23): synthesize + patterns
 
-`gbrain dream` runs the full 8-phase maintenance cycle:
+`gbrain dream` runs the full maintenance cycle (core phases shown; opt-in
+phases like atoms/concepts/drift slot in between):
 
 ```
 lint -> backlinks -> sync -> synthesize -> extract -> patterns -> embed -> orphans
@@ -123,14 +127,54 @@ lint -> backlinks -> sync -> synthesize -> extract -> patterns -> embed -> orpha
 
 The two new phases consolidate yesterday's conversations into long-term memory:
 
-**Synthesize phase:** reads transcripts from `dream.synthesize.session_corpus_dir`,
-runs a cheap Haiku verdict (cached in `dream_verdicts`) to filter routine
-ops sessions, then fans out one Sonnet subagent per worth-processing
-transcript. Each subagent writes reflections (`wiki/personal/reflections/...`),
-originals (`wiki/originals/ideas/...`), and people timeline entries. The
-orchestrator collects the slugs from `subagent_tool_executions` (NOT
-`pages.updated_at` — that would pick up unrelated writes) and reverse-renders
-each new page from DB → markdown on disk.
+**Synthesize phase (two-stage cascade):** reads transcripts from
+`dream.synthesize.session_corpus_dir`, then triages before it spends: a cheap
+utility-tier judge (`models.dream.triage`) scores every new file 0–1 for
+salience and pre-extracts candidate quotes + entities, cached in
+`dream_verdicts` with the judging model + prompt version (bounded per cycle
+by `dream.triage.max_ms`, default 5 min — deferred files retry next cycle,
+never silently rejected). A file passes the gate two ways: it scores at or
+above `dream.triage.threshold` (default 0.5), OR the **verified-segment
+rescue** fires — a score in `[dream.triage.rescue_floor, threshold)` still
+passes when at least `dream.triage.rescue_min_segments` (default 2; `0`
+disables) of the judge's own quoted segments verify as substrings of the
+transcript AND the content type is in `dream.triage.rescue_content_types`
+(default `mixed,reflection,idea,strategy,people` — never routine/technical).
+The rescue costs nothing (no extra LLM calls, it re-reads the cached verdict)
+and it is what recovers real signal buried in an otherwise mundane transcript.
+The whole gate is applied at READ time, so retuning the threshold or the
+rescue knobs re-gates with zero new LLM calls. Files that pass fan out one
+synthesis subagent per transcript chunk, each primed with the triage map. By default
+each child runs in oneshot mode (`dream.synthesize.mode`, default `oneshot`):
+ONE tool-less completion against a prompt carrying a pre-retrieved LINK
+CANDIDATES manifest (`dream.synthesize.link_manifest`, default on) and the
+write allow-list, validated end-to-end (slug fences, task shapes, wikilinks)
+before any page is written programmatically. A response that fails validation
+falls back to the classic agentic loop in the same job, where the
+`dream.synthesize.max_turns` cap (default 16) applies; revert dial:
+`gbrain config set dream.synthesize.mode agentic`. Each child writes reflections
+(`wiki/personal/reflections/...`) and originals (`wiki/originals/ideas/...`);
+people timeline entries are written only on the agentic path (fallback or
+`mode agentic`), where the child has the `add_timeline_entry` tool. The orchestrator collects the slugs from
+`subagent_tool_executions` (NOT `pages.updated_at` — that would pick up
+unrelated writes), runs the quote verify pass over them (below), and
+reverse-renders each new page from DB → markdown on disk. To re-apply the
+gate after retuning the threshold or the rescue knobs, or to drain a queued
+backlog, run `gbrain dream retriage --dry-run` (zero LLM calls, cached
+scores only) then `gbrain dream retriage --reconcile-queue`; `--force`
+re-judges everything from scratch. Retriage reads the SAME gate the cycle
+does, so a reconcile sweep never cancels a job the rescue admitted.
+
+**Quote verify/repair (post-write, zero LLM):** after slug collection and
+before the reverse-write, `dream.synthesize.quote_verify` (default on) checks
+every quoted span on the pages this phase just created against the transcript
+it came from. An exact match is kept; a span that differs only in whitespace,
+curly quotes, dashes, or case is replaced with the verbatim transcript slice;
+a near match is repaired the same way; anything that still can't be grounded
+keeps its TEXT but loses its quotation marks. Nothing is ever fabricated and
+no content is deleted. Numeric and date claims absent from the transcript are
+counted as warnings, not edits. Telemetry lands in
+`details.synthesis.quote_verify`; the config key is the incident off switch.
 
 **Patterns phase:** runs after `extract` (so the graph state is fresh).
 Reads recent reflections within `dream.patterns.lookback_days` (default 30),
@@ -139,10 +183,19 @@ pages to `wiki/personal/patterns/<theme>` when ≥`dream.patterns.min_evidence`
 (default 3) reflections support a pattern.
 
 **Quality bar (Iron Law for synthesis):**
-1. Quote the user verbatim. Do not paraphrase memorable phrasings.
+1. Quote the user verbatim. Quotation marks are ONLY for spans reproducible
+   EXACTLY from the transcript — if you cannot reproduce a span exactly,
+   paraphrase it WITHOUT quotation marks. Do not paraphrase memorable
+   phrasings you can quote exactly. (The quote verify pass enforces this
+   mechanically after the write.)
 2. Cross-reference compulsively: every new page MUST have at least one wikilink.
 3. Slug discipline: lowercase alphanumeric and hyphens only. NO underscores, NO file extensions.
 4. Edited transcripts produce NEW slugs (content-hash suffix changes) — never silently overwrite.
+5. Preserve concrete facts: carry the specific numbers, dates, dollar amounts,
+   names, and who-decided-what of the salient content, exactly as the
+   transcript states them. Do not pad with routine logistics.
+6. Ground every claim in the transcript. Attribute speculation as speculation,
+   and never state a completion state or outcome the transcript does not show.
 
 **Trust boundary (`allowed_slug_prefixes`):** the synthesis subagent runs with an
 explicit allow-list of write paths sourced from `_brain-filing-rules.json`'s
@@ -163,15 +216,17 @@ timestamp is stored in `dream.synthesize.last_completion_ts` and is written
 ONLY on successful runs (not on skipped/failed). Explicit `--input` /
 `--date` / `--from` / `--to` invocations bypass cooldown.
 
-**`--dry-run` semantics:** runs the cheap Haiku significance filter (caches
-verdicts) but skips the Sonnet synthesis pass. NOT zero LLM calls.
+**`--dry-run` semantics:** runs the scored triage pass (judges + caches
+verdicts for new files) but skips the synthesis subagents. NOT zero LLM
+calls — for a zero-call preview from cached scores use
+`gbrain dream retriage --dry-run` instead.
 
 **Configure synthesize on a fresh brain:**
 ```bash
 gbrain config set dream.synthesize.session_corpus_dir /path/to/transcripts
 gbrain config set dream.synthesize.enabled true
 gbrain dream --phase synthesize --dry-run --json   # preview
-gbrain dream                                       # full 8-phase cycle
+gbrain dream                                       # full cycle
 ```
 
 **Invocation patterns:**
@@ -195,6 +250,13 @@ Verify autopilot is running:
 ```bash
 gbrain autopilot --status
 ```
+The exit code is trustworthy for gating: 0 fresh (or nothing installed),
+1 needs attention (stale heartbeat, never ran, or paused by a migration),
+2 the daemon disabled itself (its repo path vanished). `--json` emits the
+full report (`state`, `heartbeat_age_seconds`, `paused_reason`,
+`disabled_reason`). Status reads only the filesystem, so it works even
+when the database is down.
+
 If not running, install it:
 ```bash
 gbrain autopilot --install --repo ~/brain
@@ -270,6 +332,9 @@ Populate them periodically or after major imports:
 - `gbrain stats` — verify `link_count > 0` and `timeline_entry_count > 0` after extraction.
 - `gbrain health` — review `link_coverage` and `timeline_coverage` percentages
   on entity pages (person/company). Below 50% means more extraction is needed.
+  On brains with very few entity pages these report "too few to grade"
+  (`null` in JSON, with `entity_page_count` carrying the denominator) instead
+  of a misleading 0%/100% — grow the entity set before acting on coverage.
 
 Available link types (use with `gbrain graph-query --type`):
 `attended`, `works_at`, `invested_in`, `founded`, `advises`, `mentions`, `source`.
@@ -278,6 +343,13 @@ Going forward, every `gbrain put` call auto-creates and reconciles links via the
 auto-link post-hook (default on; disable: `gbrain config set auto_link false`).
 So link-extract is mostly a one-time backfill. timeline-extract should be re-run
 after bulk imports or content edits that add new dated entries.
+
+### Feature adoption check (weekly)
+```bash
+gbrain features --json    # scan for underused features + recommendations
+```
+Run weekly alongside lint. Surfaces missing embeddings, unused integrations,
+and configuration improvements.
 
 ### Embedding freshness
 Chunks without embeddings, or chunks embedded with an old model.
@@ -343,6 +415,13 @@ their last embedding. For large brains (>5000 pages), run this with nohup:
 ```bash
 nohup gbrain embed --stale > /tmp/gbrain-embed.log 2>&1 &
 ```
+
+### Monthly backup check
+
+Run `gbrain backup status` and relay anything red. It verifies every knowledge
+repo (and the agent workspace) has a git remote — local-only means a disk loss
+loses it. Fixes are printed inline (`gbrain bootstrap repo`, `git remote add`,
+`gbrain sources harden <id>`).
 
 ### Daily verification
 

@@ -47,6 +47,7 @@ import {
   type ChatFn,
 } from './judges.ts';
 import { canonicalLookup } from '../model-pricing.ts';
+import { ensureWellFormed } from '../text-safe.ts';
 
 // ---------------------------------------------------------------------------
 // BudgetExhausted is the canonical typed error (Q2) used by every cost
@@ -67,6 +68,7 @@ import {
   type BrainstormCheckpoint,
   type CheckpointCross,
 } from './checkpoint.ts';
+import { resolveOwnerHolder } from '../owner-holder.ts';
 
 export { BudgetExhausted };
 
@@ -138,7 +140,7 @@ export interface BrainstormOptions {
   modelOverride?: string;
   /** Skip the cost-preview TTY grace window. Required for non-interactive callers. */
   skipCostPreview?: boolean;
-  /** When set, force the user holder for calibration profile lookup. Falls back to config (`emotional_weight.user_holder`) then `'garry'`. */
+  /** When set, force the user holder for calibration profile lookup. Falls back to config (`emotional_weight.user_holder`) then `'self'`. */
   holderOverride?: string;
   /** Source scope. */
   sourceId?: string;
@@ -250,9 +252,11 @@ export interface BrainstormResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Per-profile cost estimate. brainstorm: ~$0.05-0.15. lsd: ~$0.20-0.40.
- * Real numbers depend on configured model; we anchor on Sonnet pricing.
- * The estimate is informational — operators see actuals printed at run-end.
+ * Per-profile cost estimate. At Sonnet pricing ($3/M in, $15/M out — the
+ * gateway fallback), this formula yields brainstorm ~$0.8 and lsd ~$1.0;
+ * it scales linearly with the configured chat model's pricing (a Haiku 4.5
+ * chat_model at $1/$5 lands exactly 3x lower). The estimate is
+ * informational — operators see actuals printed at run-end.
  */
 export function estimateCost(profile: BrainstormProfile, model: string): number {
   const crosses = profile.k_close * profile.m_far;
@@ -359,21 +363,6 @@ export async function loadCalibrationContext(
 // Idea generation prompts + response parsing
 // ---------------------------------------------------------------------------
 
-/**
- * Strip lone/orphaned UTF-16 surrogates that would crash JSON encoding
- * downstream. The Anthropic SDK and some gateway transports refuse strings
- * containing unpaired surrogates (U+D800–U+DFFF). Page content that came
- * in via OCR or older imports occasionally has them.
- */
-function sanitizeUnicode(s: string): string {
-  if (!s) return s;
-  // Replace lone high surrogates (D800-DBFF) not followed by a low surrogate.
-  // Replace lone low surrogates (DC00-DFFF) not preceded by a high surrogate.
-  return s
-    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '�')
-    .replace(/(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '$1�');
-}
-
 /** Build a single (close × far) cross-generation prompt. */
 function buildCrossPrompt(opts: {
   profile: BrainstormProfile;
@@ -391,14 +380,16 @@ Style rules:
 - Cite BOTH the close and far slug verbatim — these are the user's own notes.
 - Never fabricate facts, figures, or quotes. Stay grounded in the cited pages.${opts.profile.generator_constraint ? `\n- ${opts.profile.generator_constraint}` : ''}`;
 
-  // Sanitize: unicode surrogates in page content (from OCR or older imports)
-  // can crash JSON encoding in the chat transport, which would void the
-  // entire cross. Cheap to fix here.
-  const closeContent = sanitizeUnicode(opts.close.content);
-  const farContent = sanitizeUnicode(opts.far.content);
-  const closeTitle = sanitizeUnicode(opts.close.title ?? '(untitled)');
-  const farTitle = sanitizeUnicode(opts.far.title ?? '(untitled)');
-  const question = sanitizeUnicode(opts.question);
+  // Sanitize: unpaired UTF-16 surrogates in page content (from OCR or older
+  // imports) can crash JSON encoding in the chat transport, which would void
+  // the entire cross. `ensureWellFormed` (shared with the #2011 jsonb path) is
+  // the canonical surrogate cleaner — it handles consecutive lone surrogates
+  // that the prior hand-rolled regex left malformed.
+  const closeContent = ensureWellFormed(opts.close.content);
+  const farContent = ensureWellFormed(opts.far.content);
+  const closeTitle = ensureWellFormed(opts.close.title ?? '(untitled)');
+  const farTitle = ensureWellFormed(opts.far.title ?? '(untitled)');
+  const question = ensureWellFormed(opts.question);
 
   const user = `QUESTION:
 ${question}
@@ -497,9 +488,44 @@ const DEFAULT_PARALLELISM = 4;
  * src/core/errors.ts (the v0.19.0 envelope every new agent-facing
  * surface uses) rather than introducing a new BrainstormError class.
  */
+/** File-config slice the orchestrator reads (see loadConfig in core/config.ts). */
+export interface BrainstormRunConfig {
+  embedding_model?: string;
+  chat_model?: string;
+  emotional_weight?: { user_holder?: string };
+}
+
+/**
+ * Model used for the cost preview + hard cost ceiling. Mirrors what the
+ * gateway will actually run: explicit --model override, else the configured
+ * chat_model (gateway default), else the hardcoded gateway fallback. Before
+ * this resolved through config, a non-Sonnet chat_model got its preview
+ * priced against the wrong model. (Takeover of PR #1855 by @starm2010.)
+ */
+export function resolveBrainstormChatModel(
+  config: { chat_model?: string },
+  modelOverride?: string,
+): string {
+  return modelOverride ?? config.chat_model ?? 'anthropic:claude-sonnet-4-6';
+}
+
+/**
+ * Judge-phase model precedence: --judge-model flag, else the
+ * `models.brainstorm.judge` config key, else undefined (falls back to
+ * `modelOverride` then the gateway default at the runJudge callsite).
+ */
+export async function resolveBrainstormJudgeModel(
+  engine: BrainEngine,
+  judgeModelFlag?: string,
+): Promise<string | undefined> {
+  if (judgeModelFlag) return judgeModelFlag;
+  const configured = await engine.getConfig('models.brainstorm.judge');
+  return configured ?? undefined;
+}
+
 export async function runBrainstorm(
   engine: BrainEngine,
-  config: { embedding_model?: string; emotional_weight?: { user_holder?: string } },
+  config: BrainstormRunConfig,
   opts: BrainstormOptions
 ): Promise<BrainstormResult> {
   // v0.39.3.0 (Phase 5, CV11+T4): outer try/catch around the orchestrator
@@ -521,7 +547,7 @@ export async function runBrainstorm(
 
 async function runBrainstormImpl(
   engine: BrainEngine,
-  config: { embedding_model?: string; emotional_weight?: { user_holder?: string } },
+  config: BrainstormRunConfig,
   opts: BrainstormOptions,
 ): Promise<BrainstormResult> {
   // v0.39.0.0 T10: install a gateway-layer BudgetTracker scope around the
@@ -541,7 +567,7 @@ async function runBrainstormImpl(
 
 async function _runBrainstormInner(
   engine: BrainEngine,
-  config: { embedding_model?: string; emotional_weight?: { user_holder?: string } },
+  config: BrainstormRunConfig,
   opts: BrainstormOptions,
 ): Promise<BrainstormResult> {
   const profile = opts.profile ?? BRAINSTORM_PROFILE;
@@ -550,7 +576,7 @@ async function _runBrainstormInner(
   const embedFn = opts.embedQueryFn ?? embedQuery;
 
   // ---- Phase 0: cost preview + TTY grace ----
-  const modelStr = opts.modelOverride ?? 'anthropic:claude-sonnet-4-6';
+  const modelStr = resolveBrainstormChatModel(config, opts.modelOverride);
   const { aborted, estimate } = await previewCostAndWait({
     profile,
     model: modelStr,
@@ -635,7 +661,7 @@ async function _runBrainstormInner(
   }
 
   // ---- Phase 3: calibration context (cold-start fallback) ----
-  const holder = opts.holderOverride ?? config.emotional_weight?.user_holder ?? 'garry';
+  const holder = resolveOwnerHolder({ override: opts.holderOverride, configValue: config.emotional_weight?.user_holder });
   const calibContext = await loadCalibrationContext(engine, {
     holder,
     sourceId: opts.sourceId,
@@ -859,7 +885,7 @@ async function _runBrainstormInner(
       far_slug: i.far_slug,
     }));
     const judgeResult = await runJudge(profile.judge_config, judgeInput, {
-      modelOverride: opts.judgeModel ?? opts.modelOverride,
+      modelOverride: (await resolveBrainstormJudgeModel(engine, opts.judgeModel)) ?? opts.modelOverride,
       chatFn: opts.chatFn,
       activeBiasTags: activeBiasTags ?? undefined,
       abortSignal: opts.abortSignal,
