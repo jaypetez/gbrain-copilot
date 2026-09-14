@@ -17,6 +17,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { GITHUB_REPO } from '../src/core/repo-coordinates.ts';
 import { TEMPLATE_PLACEHOLDER_MANIFEST } from '../src/core/bootstrap/format.ts';
 import {
   generateTemplateTree,
@@ -45,10 +46,15 @@ describe('renderTemplateReadme', () => {
 
   test('references only the sanctioned latest-stable distribution ref [C1]', () => {
     expect(readme).toContain(
-      'https://raw.githubusercontent.com/garrytan/gbrain/latest-stable/BOOTSTRAP_FOR_AGENTS.md',
+      `https://raw.githubusercontent.com/${GITHUB_REPO}/latest-stable/BOOTSTRAP_FOR_AGENTS.md`,
     );
-    expect(readme).toContain('github:garrytan/gbrain#latest-stable');
-    expect(readme).not.toMatch(/raw\.githubusercontent\.com\/garrytan\/gbrain\/(master|main|v\d)/);
+    expect(readme).toContain(`github:${GITHUB_REPO}#latest-stable`);
+    // Coordinates come from repo-coordinates.ts — this fork ships from
+    // jaypetez/gbrain-copilot, upstream from garrytan/gbrain — so a re-fork
+    // stays a one-file change.
+    expect(readme).not.toMatch(
+      new RegExp(`raw\\.githubusercontent\\.com/${GITHUB_REPO}/(master|main|v\\d)`),
+    );
   });
 
   test('is deterministic and carries no timestamps [CX2-14]', () => {
