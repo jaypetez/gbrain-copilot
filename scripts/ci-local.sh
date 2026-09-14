@@ -69,7 +69,7 @@ if [ "$DIFF" = "1" ]; then
       else
         bash scripts/test-gitleaks-config.sh
         bash scripts/scan-worktree-secrets.sh
-        gitleaks git . --redact --no-banner --log-opts="origin/master..HEAD"
+        gitleaks git . --redact --no-banner --log-opts="origin/main..HEAD"
       fi
       echo "[ci-local] Doc-only fast-path complete. No code paths exercised."
       trap - EXIT
@@ -121,11 +121,11 @@ if ! command -v gitleaks >/dev/null 2>&1; then
 fi
 # Two scopes for pre-push:
 #   1. Working-tree files (catch uncommitted secrets sitting in files)
-#   2. Branch commits vs origin/master (catch secrets committed on this branch)
+#   2. Branch commits vs origin/main (catch secrets committed on this branch)
 # Full-history scan is ~4 min on this repo's 3700+ commits; not useful pre-push.
 bash scripts/test-gitleaks-config.sh
 bash scripts/scan-worktree-secrets.sh
-gitleaks git . --redact --no-banner --log-opts="origin/master..HEAD"
+gitleaks git . --redact --no-banner --log-opts="origin/main..HEAD"
 
 # Step 1: pull. Refreshes pgvector + the pinned oven/bun tag (both are `image:` not `build:`).
 if [ "$NO_PULL" = "0" ]; then

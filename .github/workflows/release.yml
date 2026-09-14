@@ -21,7 +21,7 @@ name: Release
 
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths: [VERSION]
   workflow_dispatch: {}  # manual first run / backfill of the current VERSION
 
@@ -151,7 +151,7 @@ jobs:
         run: |
           v="$RELEASE_VERSION"
           if ! bash scripts/changelog-entry.sh "$v" > /tmp/release-notes.md || ! [ -s /tmp/release-notes.md ]; then
-            echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/master/CHANGELOG.md) for v$v." > /tmp/release-notes.md
+            echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md) for v$v." > /tmp/release-notes.md
           fi
       - name: Create release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2

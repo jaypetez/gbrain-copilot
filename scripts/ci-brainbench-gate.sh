@@ -3,7 +3,7 @@
 # .github/workflows/test.yml `brainbench` job.
 #
 # Governance: the gate compares HEAD's run against MAIN's copy of the
-# committed baseline (git show origin/master:...), NEVER the working tree's —
+# committed baseline (git show origin/main:...), NEVER the working tree's —
 # a PR cannot rewrite the thing it is compared against. Two modes resolve
 # automatically inside `eval brainbench --compare`:
 #   same fixtures_hash  → count-aware gate (any newly-failed gold item fails)
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 BASELINE_PATH="evals/brainbench/baselines/main.json"
-MAIN_REF="${BRAINBENCH_MAIN_REF:-origin/master}"
+MAIN_REF="${BRAINBENCH_MAIN_REF:-origin/main}"
 # mktemp default (review finding): a fixed world-writable /tmp path is a
 # symlink-planting target on shared hosts. CI overrides via BRAINBENCH_OUT.
 if [ -n "${BRAINBENCH_OUT:-}" ]; then
