@@ -12,8 +12,9 @@
  */
 import { closeSync, openSync, readFileSync, readSync, realpathSync } from 'node:fs';
 
-import { GITHUB_REPO } from './repo-coordinates.ts';
 import { dirname, join } from 'node:path';
+
+import { ACCEPTED_REPO_SLUGS, GITHUB_REPO } from './repo-coordinates.ts';
 
 export type GbrainBinaryKind = 'real' | 'foreign' | 'broken' | 'unknown';
 
@@ -36,8 +37,15 @@ export interface ClassifyGbrainBinaryOptions {
   realpath?: (path: string) => string;
 }
 
-/** Repository marker identifying this project's package.json. */
+/** This distribution's slug — the one the remediation text tells you to install. */
 const REAL_REPO_MARKER = GITHUB_REPO;
+
+/**
+ * Slugs whose `repository` field marks a package as a genuine source clone.
+ * Both this fork and the upstream it came from count: only the unrelated npm
+ * `gbrain` package should ever classify as suspect (see repo-coordinates.ts).
+ */
+const REAL_REPO_MARKERS = ACCEPTED_REPO_SLUGS;
 
 /** The documented install/remediation path, reused in doctor output. */
 export const NPM_SQUAT_REMEDIATION =
@@ -89,14 +97,14 @@ function nearestPackageJson(start: string): { dir: string; pkg: Record<string, a
 
 /**
  * Is this package.json THIS project? Two markers, either suffices:
- *  - repository field pointing at garrytan/gbrain (string or { url }), or
+ *  - repository field pointing at this fork OR upstream (string or { url }), or
  *  - this repo's known bin shape (`"bin": { "gbrain": "src/cli.ts" }` — a
  *    git checkout / `bun install -g github:...` install carries it verbatim;
  *    a registry-published package ships built JS, not a bare .ts bin).
  */
 function isRealGbrainPackage(pkg: Record<string, any>): boolean {
   const repo = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url;
-  if (typeof repo === 'string' && repo.includes(REAL_REPO_MARKER)) return true;
+  if (typeof repo === 'string' && REAL_REPO_MARKERS.some(slug => repo.includes(slug))) return true;
   if (pkg.bin && typeof pkg.bin === 'object' && pkg.bin.gbrain === 'src/cli.ts') return true;
   return false;
 }
@@ -125,7 +133,7 @@ function executableCandidates(path: string, platform: typeof process.platform): 
  *  - 'broken'  : symlink that doesn't resolve / unreadable path.
  *  - 'real'    : compiled gbrain binary, or a script whose nearest
  *                package.json is this project's (repo checkout / bun link /
- *                `bun install -g github:garrytan/gbrain`).
+ *                `bun install -g github:${GITHUB_REPO}`).
  *  - 'foreign' : nearest package.json is named "gbrain" but is NOT this
  *                project — an unrelated registry install.
  *  - 'unknown' : can't tell (no gbrain package.json above the resolved file).

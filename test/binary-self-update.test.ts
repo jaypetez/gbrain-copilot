@@ -3,6 +3,8 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  EXPECTED_BUILDER_IDS,
+  EXPECTED_BUILDER_ID_PREFIX,
   defaultFetchAttestation,
   expectedAssetName,
   parseAttestationBundle,
@@ -18,8 +20,10 @@ const ASSETS: ReleaseAsset[] = [
   { name: 'gbrain-linux-x64', url: 'https://example.com/linux-x64' },
 ];
 
-// A builder id that matches EXPECTED_BUILDER_ID_PREFIX (this repo's release workflow).
-const VALID_BUILDER = 'https://github.com/garrytan/gbrain/.github/workflows/release.yml@refs/heads/master';
+// A builder id that matches EXPECTED_BUILDER_ID_PREFIX (this repo's release
+// workflow). Derived from the exported constant rather than re-spelled, so a
+// re-fork stays a one-file change in src/core/repo-coordinates.ts.
+const VALID_BUILDER = EXPECTED_BUILDER_IDS[0];
 const FAKE_DIGEST = 'a'.repeat(64);
 const OTHER_DIGEST = 'b'.repeat(64);
 
@@ -277,8 +281,7 @@ describe('runBinarySelfUpdate', () => {
           {
             subjects: [{ name: 'gbrain-darwin-arm64', sha256: FAKE_DIGEST }],
             // Same repo + workflow, but minted from an arbitrary branch dispatch.
-            builderId:
-              'https://github.com/garrytan/gbrain/.github/workflows/release.yml@refs/heads/attacker-branch',
+            builderId: `${EXPECTED_BUILDER_ID_PREFIX}refs/heads/attacker-branch`,
           },
         ],
         smoke: () => true,

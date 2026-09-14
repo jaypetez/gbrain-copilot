@@ -512,7 +512,7 @@ export function buildPgliteInitErrorMessage(
         '  Most common cause: corrupt WAL/checkpoint state after an unclean\n' +
         '  shutdown (often a macOS-upgrade reboot killing gbrain mid-write) —\n' +
         '  NOT a macOS WASM bug, despite the historical diagnosis in\n' +
-        '  https://github.com/jaypetez/gbrain-copilot/issues (upstream context: garrytan/gbrain#223).\n' +
+        '  https://github.com/garrytan/gbrain/issues/223.\n' +
         repairContextLine(ctx ?? { repair: 'not-attempted' }) + '\n' +
         '  Recovery ladder:\n' +
         '    1. gbrain pglite-repair --dry-run   (diagnose, mutates nothing)\n' +
@@ -546,7 +546,7 @@ export function buildPgliteInitErrorMessage(
       hint = platform === 'darwin'
         ? '  Possible cause: corrupt WAL/checkpoint state after an unclean\n' +
           '  shutdown — the failure class behind\n' +
-          '  https://github.com/jaypetez/gbrain-copilot/issues (upstream context: garrytan/gbrain#223).\n' +
+          '  https://github.com/garrytan/gbrain/issues/223.\n' +
           '  Try `gbrain pglite-repair --dry-run` to diagnose the data dir, and\n' +
           '  run `gbrain doctor` for a full diagnosis.'
         : '  Possible causes: another gbrain process holding the database\n' +

@@ -27,7 +27,16 @@ describe('CI execution evidence', () => {
       expect(source).not.toMatch(/(?:ci|e2e)-pass-|cache-check|cache-write/);
       expect(source).toContain('bun-cache-');
       expect(source).toContain('pglite-snapshot-');
-      expect(workflow.on.pull_request.paths).toBeUndefined();
+      // No path filter on the PR trigger: a change anywhere must be gated.
+      // e2e.yml is workflow_dispatch-only in this fork (it needs provider API
+      // secrets this repo does not configure, and the Actions-minutes budget
+      // rules out running it per-PR), so it has no pull_request trigger to
+      // filter — assert the property only where the trigger exists.
+      if (workflow.on.pull_request) {
+        expect(workflow.on.pull_request.paths).toBeUndefined();
+      } else {
+        expect(workflow.on.workflow_dispatch).toBeDefined();
+      }
     }
     for (const name of ['gitleaks', 'verify']) {
       expect(unit.jobs[name].needs).toBeUndefined();

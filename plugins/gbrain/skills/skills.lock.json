@@ -146,7 +146,7 @@
   "minion-orchestrator/routing-eval.jsonl": "501ed2e19cb16847ff8425219d246b7a774de1accd42cb28fd44edbb64204992",
   "perplexity-research/SKILL.md": "c25f5c471cbe3c6e0f975d8397e8382b00a85f8aa75302231d53c52855369e97",
   "perplexity-research/routing-eval.jsonl": "f1a40d87e710d5d2acd602a372d83f46c95da022b6e635228fffeaacb3bb2b27",
-  "plugin-exclusions.json": "72b1aa20994cab46c5df4837e4b6703ca8fdc94d59ee3ee0e663cf87a19a5554",
+  "plugin-exclusions.json": "c326ba3975b6cc1ea356d3084ce4b7e3661d87ee465093659cd61fab1a7e163f",
   "plugin-lanes.json": "2f6b1f232090a3263450254478536007befc04017f7a2253d54479803d29df3e",
   "postgres-adopt/SKILL.md": "4c402527bd0d98aa4e7f1a341a25ac0d1bba5e98b3dd55bcc5e30ed2858fa0e0",
   "postgres-adopt/routing-eval.jsonl": "db91c1fae408a45082979c402c11eff413277ace6cf746297cc86009dcaefe06",

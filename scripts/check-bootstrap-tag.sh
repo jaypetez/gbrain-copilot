@@ -9,7 +9,8 @@
 # public entry documents on that contract:
 #
 #   1. Every raw.githubusercontent.com/jaypetez/gbrain-copilot/<ref>/<path> reference
-#      in README.md and BOOTSTRAP_FOR_AGENTS.md uses <ref> = latest-stable.
+#      in README.md and BOOTSTRAP_FOR_AGENTS.md uses a sanctioned <ref>
+#      (latest-stable, or main while this fork has no latest-stable tag).
 #      Carve-out: <path> = INSTALL_FOR_AGENTS.md — that is the pre-bootstrap
 #      OpenClaw/Hermes headline install path with its own (master) contract,
 #      outside the bootstrap ref rule.
@@ -39,10 +40,18 @@ set -uo pipefail
 
 ROOT="${GBRAIN_BOOTSTRAP_GUARD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 SANCTIONED='latest-stable'
+# Raw-fetch refs this fork accepts. 'latest-stable' is the contract upstream
+# defined and release.yml still advances; 'main' is a carve-out for as long as
+# this fork has no published latest-stable tag — README's installer one-liners
+# have to resolve TODAY, and a ref that does not exist yet 404s for every user.
+# Tighten to latest-stable alone once a release has advanced it (TODOS.md).
+# The install-pin rule below is NOT widened: `github:...#<ref>` is only ever
+# written deliberately, so it stays pinned to latest-stable.
+SANCTIONED_FETCH_REFS='latest-stable main'
 
 # URL terminators: whitespace, ), <, >, ", ', backtick. Built by concatenation
 # so the single quote and backtick stay literal.
-RAW_URL_RE='raw\.githubusercontent\.com/garrytan/gbrain/[^/[:space:]]+/[^[:space:])<>"'\''`]*'
+RAW_URL_RE='raw\.githubusercontent\.com/jaypetez/gbrain-copilot/[^/[:space:]]+/[^[:space:])<>"'\''`]*'
 PIN_RE='github:jaypetez/gbrain-copilot#[0-9A-Za-z._/-]+'
 
 fail=0
@@ -63,11 +72,15 @@ for rel in README.md BOOTSTRAP_FOR_AGENTS.md; do
     rest="${u#raw.githubusercontent.com/jaypetez/gbrain-copilot/}"
     ref="${rest%%/*}"
     path="${rest#*/}"
-    [ "$ref" = "$SANCTIONED" ] && continue
+    ref_ok=0
+    for sanctioned_ref in $SANCTIONED_FETCH_REFS; do
+      [ "$ref" = "$sanctioned_ref" ] && ref_ok=1 && break
+    done
+    [ "$ref_ok" -eq 1 ] && continue
     [ "$path" = "INSTALL_FOR_AGENTS.md" ] && continue
     fail=1
     echo "FAIL: $rel references unsanctioned ref '$ref': $u" >&2
-    echo "      Bootstrap fetch URLs must use the maintainer-controlled '$SANCTIONED' ref" >&2
+    echo "      Bootstrap fetch URLs must use one of: $SANCTIONED_FETCH_REFS" >&2
     echo "      (no v-prefixed pins, no branch refs). See .github/workflows/release.yml." >&2
   done <<< "$raw_refs"
 
@@ -133,5 +146,5 @@ fi
 if [ "$checked" -eq 0 ]; then
   echo "check-bootstrap-tag: ok (no bootstrap entry docs present yet — all checks skipped)"
 else
-  echo "check-bootstrap-tag: ok ($checked doc(s) on the '$SANCTIONED' distribution ref)"
+  echo "check-bootstrap-tag: ok ($checked doc(s) on a sanctioned distribution ref [$SANCTIONED_FETCH_REFS])"
 fi

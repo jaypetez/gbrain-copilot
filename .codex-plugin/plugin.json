@@ -6,8 +6,8 @@
     "name": "Garry Tan",
     "url": "https://github.com/garrytan"
   },
-  "homepage": "https://github.com/garrytan/gbrain",
-  "repository": "https://github.com/garrytan/gbrain",
+  "homepage": "https://github.com/jaypetez/gbrain-copilot",
+  "repository": "https://github.com/jaypetez/gbrain-copilot",
   "license": "MIT",
   "keywords": [
     "memory",
@@ -23,14 +23,14 @@
   "interface": {
     "displayName": "GBrain",
     "shortDescription": "Give your agent a persistent brain: search, synthesis, memory",
-    "longDescription": "GBrain wires a personal knowledge brain into every session: hybrid keyword+vector search, entity graph traversal, synthesis, and memory your agent writes itself — served on the starter MCP surface (the seven memory verbs plus the daily-driver brain ops). Bundles the curated brain-first skill set: setup (walks install + gbrain init), cold-start day-one brain filling, ingest, query, briefing, upgrade, and more. Requires the gbrain CLI (bun install -g github:garrytan/gbrain#latest-stable) and a brain (gbrain init); the bundled setup skill walks the rest. Unix (macOS/Linux) only.",
+    "longDescription": "GBrain wires a personal knowledge brain into every session: hybrid keyword+vector search, entity graph traversal, synthesis, and memory your agent writes itself — served on the starter MCP surface (the seven memory verbs plus the daily-driver brain ops). Bundles the curated brain-first skill set: setup (walks install + gbrain init), cold-start day-one brain filling, ingest, query, briefing, upgrade, and more. Requires the gbrain CLI (bun install -g github:jaypetez/gbrain-copilot#latest-stable) and a brain (gbrain init); the bundled setup skill walks the rest. Unix (macOS/Linux) only.",
     "developerName": "Garry Tan",
     "category": "Productivity",
     "capabilities": [
       "Interactive",
       "Write"
     ],
-    "websiteURL": "https://github.com/garrytan/gbrain",
+    "websiteURL": "https://github.com/jaypetez/gbrain-copilot",
     "defaultPrompt": [
       "Search my brain, recall context across sessions, and write new memory as we work"
     ],

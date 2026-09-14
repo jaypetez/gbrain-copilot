@@ -703,7 +703,7 @@ export async function checkPgliteScratchProbe(opts: {
         message:
           `A fresh scratch PGLite store ALSO failed to start (${secs}s), so the WASM runtime cannot run ` +
           `on this machine — your store is not necessarily damaged. Report your OS and Bun versions on ` +
-          `https://github.com/jaypetez/gbrain-copilot/issues (upstream context: garrytan/gbrain#223). Scratch error: ${errLine}`,
+          `https://github.com/garrytan/gbrain/issues/223. Scratch error: ${errLine}`,
         details: { scratch_ok: false, duration_ms: r.duration_ms, error: r.error, verdict: r.verdict },
       };
     }
@@ -713,7 +713,7 @@ export async function checkPgliteScratchProbe(opts: {
       message:
         `Your real store opened, but a fresh scratch PGLite store failed to initialize (${secs}s) — ` +
         `new stores can't be created on this machine. Report your OS and Bun versions on ` +
-        `https://github.com/jaypetez/gbrain-copilot/issues (upstream context: garrytan/gbrain#223). Scratch error: ${errLine}`,
+        `https://github.com/garrytan/gbrain/issues/223. Scratch error: ${errLine}`,
       details: { scratch_ok: false, duration_ms: r.duration_ms, error: r.error, verdict: r.verdict },
     };
   } catch (e) {

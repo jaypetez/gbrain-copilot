@@ -13,6 +13,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EXPECTED_BUILDER_IDS, expectedAssetName } from '../src/core/binary-self-update.ts';
+import { DEFAULT_BRANCH } from '../src/core/repo-coordinates.ts';
 
 const ROOT = join(import.meta.dir, '..');
 const WORKFLOW = readFileSync(join(ROOT, '.github/workflows/release.yml'), 'utf8');
@@ -77,7 +78,12 @@ describe('release.yml ↔ binary-self-update asset contract', () => {
       expect(ref.startsWith('refs/')).toBe(true);
     }
     // The workflow this repo actually ships from is the one the ids name.
-    expect(EXPECTED_BUILDER_IDS.some((id) => id.endsWith('@refs/heads/master'))).toBe(true);
+    // Derived from DEFAULT_BRANCH (repo-coordinates.ts) rather than hardcoded:
+    // this fork ships from main, upstream from master, and the constant is the
+    // single place that knows which.
+    expect(
+      EXPECTED_BUILDER_IDS.some((id) => id.endsWith(`@refs/heads/${DEFAULT_BRANCH}`)),
+    ).toBe(true);
   });
 
   test('release builds the admin UI fresh from source before compiling', () => {

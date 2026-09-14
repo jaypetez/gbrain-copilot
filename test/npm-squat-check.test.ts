@@ -12,6 +12,7 @@ import {
   assessGbrainBinaries,
   classifyGbrainBinary,
 } from '../src/core/npm-squat-check.ts';
+import { GITHUB_REPO } from '../src/core/repo-coordinates.ts';
 
 let root: string;
 
@@ -27,7 +28,7 @@ function makePkg(dir: string, pkg: Record<string, unknown>, binRel = 'cli.js'): 
 
 let foreignLink: string; // symlink → unrelated npm package named "gbrain"
 let realBinShapeLink: string; // symlink → checkout with bin.gbrain = src/cli.ts
-let realRepoFieldLink: string; // symlink → package with garrytan/gbrain repository url
+let realRepoFieldLink: string; // symlink → package with the upstream repository url
 let brokenLink: string;
 let nativeBin: string; // fake compiled binary (ELF magic)
 let orphanScript: string; // script with no package.json above it
@@ -54,7 +55,8 @@ beforeAll(() => {
   realBinShapeLink = join(binDir, 'gbrain-real');
   symlinkSync(realBin, realBinShapeLink);
 
-  // Real project by repository field.
+  // Real project by repository field — upstream's slug, which must still
+  // classify as real in this fork (repo-coordinates.ts ACCEPTED_REPO_SLUGS).
   const repoFieldBin = makePkg(
     join(root, 'repo-field'),
     {
@@ -95,7 +97,7 @@ describe('classifyGbrainBinary', () => {
     expect(classifyGbrainBinary(realBinShapeLink).kind).toBe('real');
   });
 
-  test('garrytan/gbrain repository field → real', () => {
+  test('upstream repository field → real (either canonical clone counts)', () => {
     expect(classifyGbrainBinary(realRepoFieldLink).kind).toBe('real');
   });
 
@@ -171,7 +173,7 @@ describe('assessGbrainBinaries', () => {
     const a = assessGbrainBinaries([foreignLink, realBinShapeLink]);
     expect(a.status).toBe('warn');
     expect(a.message).toContain('unrelated npm package');
-    expect(a.message).toContain('bun install -g github:garrytan/gbrain');
+    expect(a.message).toContain(`bun install -g github:${GITHUB_REPO}`);
   });
 
   test('only foreign on PATH → warn', () => {

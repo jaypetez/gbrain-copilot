@@ -15,6 +15,7 @@ import { readFileSync, readdirSync, existsSync, statSync, mkdtempSync, mkdirSync
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { spawnSync } from 'child_process';
+import { GITHUB_REPO } from '../src/core/repo-coordinates.ts';
 
 const ROOT = join(import.meta.dir, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -56,7 +57,7 @@ describe('codex plugin.json', () => {
     expect(i.longDescription.length).toBeGreaterThan(100);
     // The longDescription is the recovery path's storefront: it must carry
     // the pinned install ref and the init requirement.
-    expect(i.longDescription).toContain('github:garrytan/gbrain#latest-stable');
+    expect(i.longDescription).toContain(`github:${GITHUB_REPO}#latest-stable`);
     expect(i.longDescription).toContain('gbrain init');
   });
 });
@@ -230,7 +231,7 @@ describe('launcher (static)', () => {
   });
 
   test('carries the sanctioned install ref, never the squatted npm name', () => {
-    expect(text).toContain('github:garrytan/gbrain#latest-stable');
+    expect(text).toContain(`github:${GITHUB_REPO}#latest-stable`);
     expect(text).not.toMatch(/npm install -g gbrain(?!['\w-])(?![^\n]*unrelated)/);
   });
 
@@ -278,7 +279,7 @@ describe('launcher (behavioral — every resolver branch, hermetic HOME)', () =>
     try {
       const r = run({}, ['serve'], home);
       expect(r.status).toBe(127);
-      expect(r.stderr).toContain('bun install -g github:garrytan/gbrain#latest-stable');
+      expect(r.stderr).toContain(`bun install -g github:${GITHUB_REPO}#latest-stable`);
       expect(r.stderr).toContain('setup');
       expect(r.stderr).toContain('GBRAIN_BIN');
     } finally {

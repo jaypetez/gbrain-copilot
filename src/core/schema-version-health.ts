@@ -23,7 +23,7 @@ export function schemaVersionHealth(
       message: opts.remote
         ? `No schema version recorded. Migrations never ran. ${migrationFix}`
         : `No schema version recorded. Migrations never ran. ${migrationFix}. ` +
-          `If you installed via 'bun install -g github:...', see https://github.com/jaypetez/gbrain-copilot#install (upstream context: garrytan/gbrain#218).`,
+          `If you installed via 'bun install -g github:...', see https://github.com/garrytan/gbrain/issues/218.`,
     };
   }
 
