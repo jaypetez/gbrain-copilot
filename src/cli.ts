@@ -768,11 +768,6 @@ async function main() {
   // because the import.meta.main seam exits explicitly on every one-shot path.
   const READ_OP_TIMEOUT_MS = 180_000;
 
-  // Tracks the exit code the catch below sets, so the finally can re-assert
-  // it after engine.disconnect(). PGLite's bundled Emscripten runtime assigns
-  // `process.exitCode` itself (nonzero mid-run, 0 on clean WASM exit), so the
-  // ambient value can't be trusted on either side of disconnect.
-  let opErrorExitCode: number | undefined;
   try {
     const { withTimeout, OperationTimeoutError } = await import('./core/timeout.ts');
     const wallclockMs = getCliOptions().timeoutMs ?? READ_OP_TIMEOUT_MS;

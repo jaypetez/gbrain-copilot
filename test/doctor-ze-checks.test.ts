@@ -11,7 +11,7 @@
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
-import { withEnv, emptyHome } from './helpers/with-env.ts';
+import { withEnv } from './helpers/with-env.ts';
 import {
   checkZeEmbeddingHealth,
   checkEmbeddingWidthConsistency,
@@ -28,6 +28,15 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await engine.disconnect();
+  // This file configures the gateway to ZE/1280 shapes. Restore the legacy
+  // 1536-d preload default so we don't leak a 1280 gateway into the next
+  // test file's beforeAll-time initSchema (which runs before the preload's
+  // beforeEach restore can fire). See legacy-embedding-preload.ts.
+  configureGateway({
+    embedding_model: 'openai:text-embedding-3-large',
+    embedding_dimensions: 1536,
+    env: { ...process.env },
+  });
 });
 
 beforeEach(async () => {

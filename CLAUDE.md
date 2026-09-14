@@ -168,7 +168,7 @@ detail on demand.)
 | skill routing | `skills/RESOLVER.md` |
 | agent bootstrap (paste-in install, hooks, `gbrain bootstrap`, sweep, keyless) | `docs/guides/bootstrap.md` + `docs/designs/AGENT_BOOTSTRAP_PLAN.md` + the KEY_FILES bootstrap cluster |
 | shipping a release / CHANGELOG / PR conventions | `docs/RELEASING.md` (ship IRON RULES stay inline below) |
-| syncing this fork with upstream garrytan/gbrain | `docs/FORK_SYNC.md` + `scripts/sync-upstream.sh` |
+| syncing this fork with upstream garrytan/gbrain; fork maintenance cadence | `docs/MAINTENANCE.md` + `scripts/sync-upstream.sh` |
 
 The per-file index (`## Key files`), the thin-client routing seam, and the testing
 discipline used to live inline here. They moved to the docs above so this file

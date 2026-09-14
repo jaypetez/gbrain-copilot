@@ -3378,6 +3378,17 @@ is deterministic + precision-biased. See plan + GSTACK REVIEW REPORT at
   + the surname arm (know_to_ask 0.15→0, push_recall +9.6pp, false_fire/precision
   unmoved). Do not re-add trigram here without a fixture that defeats the
   near-miss class first.
+- [ ] **P3 — broaden entity detection beyond proper-case ASCII.** The extractor
+  (`src/core/context/entity-salience.ts`) misses lowercase names and many non-Latin
+  scripts; these need an LLM pass or script-aware heuristics. **Why:** higher recall
+  on the read side. **Where:** `entity-salience.ts`. *(Partially done by the #2095
+  wave: `extractCandidatesFromWindow` now covers assistant-introduced entities and
+  pronoun follow-ups whose antecedent was NAMED in the rolling window; true pronoun
+  coreference for never-named antecedents remains with the LLM-pass idea.)*
+- [ ] **P3 — recall knob: optional fuzzy/prefix-expansion resolution.** The resolver
+  (`src/core/context/retrieval-reflex.ts`) is exact-only (alias + title + slug-suffix)
+  for precision. Revisit adding `resolveEntitySlug`'s trgm-fuzzy / prefix-expansion
+  arm, gated on an unambiguous single hit, if recall telemetry comes back weak.
 
 ## gbrain#1972 job-layer follow-up (v0.43+)
 

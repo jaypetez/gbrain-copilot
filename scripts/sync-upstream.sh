@@ -6,7 +6,7 @@
 # getting new gbrain. This script is the repeatable front half of the sync:
 # it wires the remote, reports the gap, and (with --merge) starts the merge on
 # a branch. The back half — resolving conflicts and re-running the fork's
-# coordinate sweep — is human/agent work, documented in docs/FORK_SYNC.md.
+# coordinate sweep — is human/agent work, documented in docs/MAINTENANCE.md.
 #
 # Usage:
 #   scripts/sync-upstream.sh                 # report the gap, change nothing
@@ -77,7 +77,7 @@ if [ "$DO_MERGE" -eq 0 ]; then
   printf '%s\n' "$OVERLAP" | sed 's/^/    /'
   echo
   echo "[sync] report only. Re-run with --merge to start the merge,"
-  echo "       and read docs/FORK_SYNC.md before resolving."
+  echo "       and read docs/MAINTENANCE.md before resolving."
   exit 0
 fi
 
@@ -94,7 +94,7 @@ echo "[sync] creating $BRANCH and merging $UPSTREAM_REF ..."
 git checkout -b "$BRANCH"
 
 if git merge "$UPSTREAM_REF" --no-edit; then
-  echo "[sync] merged cleanly. Still run the post-merge checklist in docs/FORK_SYNC.md."
+  echo "[sync] merged cleanly. Still run the post-merge checklist in docs/MAINTENANCE.md."
   exit 0
 fi
 
@@ -102,6 +102,6 @@ echo
 echo "[sync] conflicts to resolve:"
 git diff --name-only --diff-filter=U | sed 's/^/    /'
 echo
-echo "[sync] next: docs/FORK_SYNC.md — resolution policy, the fork-coordinate"
+echo "[sync] next: docs/MAINTENANCE.md — resolution policy, the fork-coordinate"
 echo "       sweep, and the post-merge checklist."
 exit 2

@@ -69,6 +69,30 @@ If `gbrain doctor` reports stale embeddings, follow [`skills/migrations/v0.48.3.
 - Dropped the deprecated `skills/install` pointer skill, which upstream removed in favour of `skills/setup`.
 - Version-stamped the full set this fork now carries: `VERSION`, `package.json`, `plugin.json`, both `.github/plugin/marketplace.json` fields, the generated `plugins/gbrain/plugin.json`, `openclaw.plugin.json`, `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, the `BOOTSTRAP_FOR_AGENTS.md` runbook stamp, and the regenerated bootstrap template tree.
 
+## [0.42.57.1] - 2026-07-09 (gbrain-copilot fork)
+
+**Caught this fork up with upstream. Everything from [garrytan/gbrain](https://github.com/garrytan/gbrain) through v0.42.57.0 is now merged in — a security-hardening pass, a sync-reliability wave, and a PGLite data-directory lock fix — on top of this fork's GitHub Copilot CLI layer, which is unchanged.**
+
+This is a maintenance release: no new fork-specific features, just the upstream backlog folded in and re-verified against the Copilot packaging. The Copilot install/upgrade flow, the thin plugin payload, and the `gbrain doctor` exit-code contract (0 = healthy, 1 = warnings, 2 = failures) all carry forward.
+
+### Added (from upstream)
+- Push-based context and the retrieval-reflex window, native DB-contention pacing for embed/sync backfills, brain-resident skillpacks with a proactive advisor, a temporal timeline + thought-diary layer, and a delta-aware sync cost estimator. See the per-version entries below for detail.
+
+### Fixed (from upstream)
+- **Security hardening pass.** Filesystem, skills, and slug confinement plus consent defaults were tightened. Fresh installs are secure by default; existing brains are brought to the same bar automatically on upgrade. If `gbrain doctor` flags anything after upgrading, its message names each item and the exact fix.
+- **Sync reliability.** Checkpoint integrity, a contention-free clock, honest sync-freshness reporting, and an autopilot dead-job / supervisor-wedge fix land together, so `gbrain sync` converges under pool exhaustion and repeated kills.
+- **PGLite corruption guard.** A busy `gbrain dream` / `embed` can no longer have its data-directory lock stolen by a second process; a live holder is never reaped, and an already-corrupted store now prints exact recovery steps.
+
+### Merge notes
+- The fork's doctor exit-code contract is preserved, now routed through upstream's cleanup-safe teardown (`setCliExitVerdict`) rather than a hard `process.exit` that skips DB/disconnect cleanup.
+- Fork identity (Copilot manifests, install scripts, `src/core/repo-coordinates.ts`, README/COPILOT docs, workflow tuning) was kept as-is through the merge.
+
+### To take advantage of v0.42.57.1
+
+Existing brains: `gbrain upgrade`. Migrations apply automatically. If `gbrain doctor` exits nonzero after the upgrade, that is the exit-code contract doing its job — run `gbrain doctor --json` to see what it found and follow the named fix.
+
+Copilot CLI users: no reinstall needed; the plugin payload is unchanged. `gbrain upgrade` pulls this release from the fork.
+
 ## [0.50.0.0] - 2026-09-10
 
 **Approve client connection requests and keep background work within the access you granted.**
@@ -7093,6 +7117,7 @@ The reported page and type counts now come from the `database_path` in `~/.gbrai
 ### To take advantage of v0.42.58.0
 `gbrain upgrade`. If you run on Ollama, a LiteLLM proxy, llama-server, or as a Claude Code MCP subprocess, the fixes apply automatically — no migration, no config change. If you use a user-provided embedding recipe (LiteLLM / llama-server) and see a "no default embedding dimension" message, set it with `gbrain init --embedding-dimensions <N>`.
 
+Fresh install: run `scripts/install-copilot.ps1` (Windows) or `scripts/install-copilot.sh` (macOS/Linux), then `/plugin install jaypetez/gbrain-copilot` inside `copilot`. Existing brains: `gbrain upgrade`, then wire Copilot via `docs/mcp/COPILOT_CLI.md`.
 ## [0.42.57.0] - 2026-07-02
 
 **PGLite incident fix: a busy `gbrain dream` (or `embed`) could have its data-directory lock stolen and get its brain corrupted beyond in-place repair. The lock will no longer be taken from a process that is alive, and an already-corrupted store now tells you exactly how to recover.**
