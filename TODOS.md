@@ -1,5 +1,44 @@
 # TODOS
 
+## Upstream-sync follow-ups (filed from v0.50.0.1, the v0.42.37.0 → v0.50.0.0 merge)
+
+- [ ] **P2 — Tighten `check-bootstrap-tag.sh` back to `latest-stable` alone.**
+  The guard currently accepts `main` as a raw-fetch ref too, because this fork
+  has never published a `latest-stable` tag — README's installer one-liners
+  would 404 for every user. `release.yml` force-advances that tag as the final
+  step of every release, so once v0.50.0.1 publishes, the tag exists.
+  **How:** confirm `git ls-remote --tags origin` shows `latest-stable`, repoint
+  README's three raw URLs (`BOOTSTRAP_FOR_AGENTS.md`, `scripts/install-copilot.ps1`,
+  `scripts/install-copilot.sh`) at it, then drop `main` from
+  `SANCTIONED_FETCH_REFS`. **Effort:** S.
+
+- [ ] **P2 — Fix the Windows test quirks the merge re-confirmed, or gate them.**
+  A local serial run on Windows fails ~18 tests in classes that have nothing to
+  do with what they assert: POSIX executable bits (`mode & 0o100`), file modes
+  (`0o600` vs `0o666`), `/bin/sh` launcher execution, colon-separated `PATH`
+  construction, `Bun.spawn(['bun', …])` failing to resolve `bun`, and
+  `new URL(…).pathname` yielding `/C:/…`. They all pass on Linux CI, so the
+  fork's own contributors get a misleading local signal. Either skip them on
+  win32 with a stated reason or fix the path/mode handling.
+  **Where:** `test/codex-plugin-manifest.test.ts`, `test/harness-onboarding.test.ts`,
+  `test/scripts/ci-gates.test.ts`, `test/check-bootstrap-guards.test.ts`,
+  `test/cli.test.ts`, `test/check-update.test.ts`. **Effort:** M.
+
+- [ ] **P3 — Sweep the remaining `master` prose in workflow comments.**
+  `fix(ci)` repointed every functional `origin/master` / `branches: [master]`
+  reference and guarded the class, but comments still say things like "lands on
+  master" in `release.yml`, `heavy-tests.yml`, `semgrep.yml` and `e2e.yml`.
+  Harmless, but misleading in a repo whose default branch is `main`.
+  **Effort:** S.
+
+- [ ] **P3 — Consider pushing the fork's generic fixes upstream.**
+  Three guard fixes from this sync are not fork-specific and would reduce the
+  delta to carry: the Windows path normalization in `check-orphan-modules.mjs`
+  and `check-skill-refs.mjs`, and `check-skill-brain-first.sh` parsing doctor's
+  JSON with bun instead of python3. See `docs/MAINTENANCE.md`, closing note.
+  **Effort:** S.
+
+
 ## Issue-audit wave follow-ups (filed from v0.42.39.0, issues #1-#10)
 
 - [ ] **P2 — Migrate the remaining doctor `db.getConnection()` sites to `engine.executeRaw`.**

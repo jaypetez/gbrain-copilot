@@ -235,6 +235,21 @@ in the same change, or CI shard 1 fails.
 
 ---
 
+## Push generic fixes upstream
+
+If a sync ever gets painful enough that you consider carrying a patch series
+instead of a merge, do the opposite: send the fork's non-fork-specific
+improvements upstream so there is less delta to carry. Anything that is not
+Copilot packaging, fork coordinates, or a deliberate fork behaviour is a
+candidate.
+
+The v0.50.0.1 sync produced three: Windows path normalization in
+`check-orphan-modules.mjs` and `check-skill-refs.mjs` (both compared backslash
+paths against `/`-separated literals and silently checked nothing), and
+`check-skill-brain-first.sh` parsing doctor's JSON with bun instead of python3.
+
+---
+
 ## Quarterly / pre-ship: refresh GitHub Actions SHAs
 
 All actions in `.github/workflows/*` are pinned to full commit SHAs with `# vN`
