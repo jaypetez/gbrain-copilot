@@ -2,6 +2,73 @@
 
 All notable changes to GBrain will be documented in this file.
 
+## [0.50.0.1] - 2026-09-13
+
+**This fork is caught up with upstream. Everything gbrain shipped between v0.42.37.0 and v0.50.0.0 is now here — and the Copilot CLI support is still here too.**
+
+The fork had drifted seven minor versions behind the project it came from. This release merges all of it: 748 upstream commits, including the MEMORY_VERBS v1 protocol, relational retrieval, the harness adapter registry, the schema-pack work, the module peels across `operations.ts` / `doctor.ts` / both engines, and the security hardening pass that landed in v0.50.0.0.
+
+The Copilot CLI layer survived the merge intact, and in two places it got better by adopting upstream's version of a fix the fork had solved independently.
+
+**What this means for you:**
+
+| | Before | After |
+|---|---|---|
+| Upstream version inside this fork | v0.42.37.0 (June) | v0.50.0.0 (September) |
+| Coding agents you can connect | Claude Code, Codex, Copilot CLI | + opencode, Grok, Muse, Claude Desktop, Cursor, Perplexity |
+| Memory protocol | full tool catalog only | `serve --surface verbs` — the seven frozen memory verbs |
+| Binary self-update on a fork build | would have rejected every binary | verifies against this fork's release workflow |
+
+**Self-update was the important one.** Upstream's binary self-update verifies a downloaded binary against a GitHub build-provenance attestation pinned to `garrytan/gbrain`'s release workflow on `refs/heads/master`. Merged as-is into a fork that builds on `jaypetez/gbrain-copilot` / `main`, every self-update would have failed its integrity check and refused to install. The attestation identity, the version probe, the release URLs, the install hints, and the npm-squat marker now all resolve through `src/core/repo-coordinates.ts`, so a future re-fork stays a one-file change.
+
+**Things to watch after upgrading:**
+
+- **Your search index needs rebuilding.** Upstream's v0.48.3.0 changed the chunker; existing chunks stay on the old boundaries until you re-embed. Run `gbrain doctor` — it will tell you. Full instructions: [`skills/migrations/v0.48.3.0.md`](skills/migrations/v0.48.3.0.md).
+- **Schema migrations go from 0.42-era to v149.** Back up first, then `gbrain apply-migrations --yes`.
+- **`whoami` over stdio MCP returns less.** It used to include your OS account name; it now returns `{transport: "stdio", scopes: []}`. Upstream's shape is the right one — the OS username was never needed and shouldn't cross an MCP pipe.
+- **`gbrain doctor` still exits 0 / 1 / 2** (healthy / warnings / failures). Upstream uses 0 / 1; this fork keeps the three-way contract, so scripts written against it keep working.
+
+## To take advantage of v0.50.0.1
+
+**Say to your agent:** *"Upgrade gbrain, apply migrations, and check whether my search index needs rebuilding."*
+
+This is a large jump. Back up before you start, and stop any running services:
+
+```bash
+gbrain backup create          # or copy ~/.gbrain if you are on PGLite
+gbrain jobs list --json       # drain or cancel in-flight work first
+```
+
+Then upgrade and migrate:
+
+```bash
+bun install -g github:jaypetez/gbrain-copilot
+gbrain --version              # expect 0.50.0.1
+gbrain apply-migrations --yes
+gbrain doctor
+```
+
+Copilot CLI users: reinstall the plugin so it picks up the merged skill set.
+
+```
+copilot plugin marketplace add jaypetez/gbrain-copilot
+copilot plugin install gbrain@gbrain-copilot
+```
+
+If `gbrain doctor` reports stale embeddings, follow [`skills/migrations/v0.48.3.0.md`](skills/migrations/v0.48.3.0.md) before relying on semantic search again. Upstream's per-release migration notes for everything in between live in `skills/migrations/`.
+
+### Itemized changes
+
+- Merged upstream `garrytan/gbrain` v0.50.0.0 (748 commits) into the fork, resolving 41 conflicting files across source, tests, docs, skills, and CI.
+- `--agent copilot` is now a first-class harness adapter (`connection: 'copilot-json'`) in `src/core/harness/registry.ts`, sitting beside upstream's new `opencode` lane. `gbrain connect` carries both direct-config-write install lanes; neither needs the agent's binary on PATH.
+- Repointed every self-update, release-lookup, and install coordinate at this fork through `src/core/repo-coordinates.ts`: binary-self-update attestation builder id and endpoint, `check-update`'s version probe and release-notes URL, `upgrade`'s install commands, the npm-squat repo marker, and the agent-install / bootstrap / PGLite-asset install hints.
+- Swept 58 stale upstream URLs out of shipped docs, skills, and scripts (raw fetches, `bun install -g github:` commands, plugin-marketplace coordinates). `scripts/check-bootstrap-tag.sh` now guards the fork's coordinates instead of upstream's.
+- Ported the fork's doctor fixes into the modules upstream peeled them to: `ze_embedding_health`'s deferred-setup and gateway-default demotions and its `fileCfg` test seam now live in `doctor/checks/graph-embedding.ts`; the PGLite-specific `pgvector` failure guidance lives in `doctor/checks/core-health.ts`.
+- Kept the fork's 0 / 1 / 2 doctor exit-code contract, now routed through upstream's `setCliExitVerdict` so database connections and unload handlers still run on exit.
+- Adopted upstream's implementations where they superseded a fork fix: `whoami`'s stdio transport shape (#1061), the Windows `serve` parent-death watchdog (signal-0 liveness folded into `readLiveParentPid` / `probeWatchdogAvailable`), the Bun-native `postinstall` script, and `jsonb_integrity`'s `to_regclass` existence probe.
+- Dropped the deprecated `skills/install` pointer skill, which upstream removed in favour of `skills/setup`.
+- Version-stamped the full set this fork now carries: `VERSION`, `package.json`, `plugin.json`, both `.github/plugin/marketplace.json` fields, the generated `plugins/gbrain/plugin.json`, `openclaw.plugin.json`, `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, the `BOOTSTRAP_FOR_AGENTS.md` runbook stamp, and the regenerated bootstrap template tree.
+
 ## [0.50.0.0] - 2026-09-10
 
 **Approve client connection requests and keep background work within the access you granted.**
