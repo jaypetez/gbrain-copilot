@@ -18,7 +18,7 @@ This is a maintenance release: no new fork-specific features. The upstream backl
 
 ### Merge notes
 - Fork identity (Copilot manifests, install scripts, `src/core/repo-coordinates.ts`, README/COPILOT docs) was kept through the merge. The repo-coordinates repoint was re-applied to every new upstream call site.
-- The fork's doctor exit-code contract (0 healthy / 1 warnings / 2 failures) and fresh-brain behavior were ported onto upstream's reorganized doctor.
+- **Behavior change:** the fork's earlier doctor exit-code contract (0 healthy / 1 warnings / 2 failures) is retired. `gbrain doctor` now follows upstream: warnings exit 0, failures exit non-zero. Upstream's doctor warns on a fresh keyless brain, so scripts that treated exit 1 as "warnings" should read the JSON `status` instead.
 - CI was retargeted to GitHub-hosted runners and the `main` branch; scheduled and end-to-end workflows stay manual-only, and the release gate now waits on the Test workflow alone.
 - Upstream now requires Bun 1.4.0 or newer; CI and the docs follow.
 

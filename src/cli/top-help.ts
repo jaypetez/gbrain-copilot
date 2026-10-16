@@ -30,7 +30,7 @@ SETUP
   check-update [--json]              Check for new versions
   repair [<kind>] [--apply]          Preview/apply residual repairs (timeline, visibility, safe-chunks)
   projections drain [--limit n]      Rebuild queued text projections now [--json]
-  doctor [--json] [--fast] [--probe-pglite]  Health check (resolver, skills, pgvector, RLS, embeddings; --probe-pglite runs the scratch-store probe); exit 0=healthy 1=warnings 2=failures
+  doctor [--json] [--fast] [--probe-pglite]  Health check (resolver, skills, pgvector, RLS, embeddings; --probe-pglite runs the scratch-store probe)
   onboard [--check|--auto|--history]  Brain-health remediation plan (--auto applies fixes)
   integrations [subcommand]          Manage integration recipes (senses + reflexes)
 

@@ -618,11 +618,7 @@ export async function checkPackUpgradeAvailable(
     return {
       check: {
         name: 'pack_upgrade_available',
-        // Fresh-empty-brain demotion: an available successor pack is an
-        // opt-in upgrade nudge (fires on pristine installs whose default
-        // pack predates the successor), not a defect - ok + hint, and the
-        // manual_only remediation still surfaces through onboard's plan.
-        status: 'ok',
+        status: 'warn',
         message:
           `Active pack: ${active.identity}. Successor available: ${successor.identity}. ` +
           `Preview: \`gbrain onboard --check --explain\``,

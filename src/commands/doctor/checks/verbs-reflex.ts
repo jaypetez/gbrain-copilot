@@ -131,19 +131,14 @@ export function buildRetrievalReflexCheck(skillsDir: string | null): Check {
         ? 'enabled; not observed firing yet'
         : 'enabled but NO resolve path exists right now: the IPC socket is only bound by a running `gbrain serve` (stdio or --http) — until one is up, hooks/reflex degrade to no_serve on this brain (host capability may still supply pointers; policy skill carries otherwise)';
 
-    // Fork (issue #5): an enabled-but-not-observably-firing reflex is a
-    // can't-confirm, not a known failure (host-supplied resolve paths are
-    // invisible here; a fresh brain has no `gbrain serve` yet). Report ok WITH
-    // the setup hint so a pristine brain still exits 0. Only an
-    // explicitly-disabled reflex (handled above) is reported differently.
-    const status: Check['status'] = 'ok';
+    const status: Check['status'] = firedRecently || viablePathVisible ? 'ok' : 'warn';
     const skillHint = skillInstalled
       ? ''
       : ' — policy skill not installed; run `gbrain integrations install retrieval-reflex --target <host-repo>`';
-    const noServe = !(firedRecently || viablePathVisible) && engineKind === 'pglite';
+    const noServe = status === 'warn' && engineKind === 'pglite';
     return {
       name,
-      status,
+      status: noServe ? 'ok' : status,
       message: `${pathDesc}; ${runtimeMsg}${skillHint}`,
       ...(noServe ? noServeInfo(cfg) : {}),
       details: {

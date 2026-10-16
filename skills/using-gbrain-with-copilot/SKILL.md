@@ -47,8 +47,8 @@ This skill guarantees:
    (macOS/Linux), or: install Bun, then
    `bun install -g github:jaypetez/gbrain-copilot`.
 2. `gbrain doctor --json` — every check should pass. A missing brain means
-   `gbrain init --pglite` has not run yet. Exit code: 0 = healthy,
-   1 = warnings, 2 = failures.
+   `gbrain init --pglite` has not run yet. Exit code: 0 unless a check
+   fails (warnings still exit 0 — read each check's `status` and `fix`).
 
 ## Wiring (pick exactly ONE skills path)
 
@@ -116,7 +116,7 @@ Copilot CLI prompts per tool use. Pre-approve gbrain for a session with
 Follow the [agent operator protocol](../conventions/agent-operator-protocol.md) for any gbrain error `code`, exit code, `[AGENT]` block or notice block. Specific to this skill:
 
 - Copilot shows no gbrain tools: re-run the verify steps above, then match the symptom in Troubleshooting; never edit `mcp-config.json` without telling the user.
-- `gbrain doctor` exits 1 (warnings) or 2 (failures) in this fork: read the `fix` on each non-ok check instead of retrying.
+- `gbrain doctor` reports non-ok checks: read the `fix` on each one instead of retrying.
 
 ## Output Format
 

@@ -146,10 +146,6 @@ export async function pgvectorCheck(engine: BrainEngine): Promise<Check> {
     if (ext.length > 0) {
       return { name: 'pgvector', status: 'ok', message: 'Extension installed' };
     }
-    if (engine.kind === 'pglite') {
-      // PGLite bundles pgvector; absence means the schema never initialized.
-      return { name: 'pgvector', status: 'fail', message: 'Extension not found. PGLite bundles pgvector, so this means a broken init. Re-run: gbrain init --migrate-only' };
-    }
     return { name: 'pgvector', status: 'fail', message: 'Extension not found. Run: CREATE EXTENSION vector;' };
   } catch {
     return checkError('pgvector', 'check pgvector extension');

@@ -64,6 +64,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.native_only == true && '-native-only' || '' }}${{ github.event_name == 'workflow_dispatch' && (inputs.race_hunt == true || inputs.stress_files != '' || inputs.stress_base != '') && format('-diagnostic-{0}', github.run_id) || '' }}${{ github.event_name == 'schedule' && '-nightly' || '' }}
   cancel-in-progress: true
 
+# Fork (gbrain-copilot): the default branch is main; upstream's scripts default
+# their baseline ref to origin/master.
+env:
+  BRAINBENCH_MAIN_REF: origin/main
+  GBRAIN_MIGRATION_BASE_REF: origin/main
+  GBRAIN_FUNCTION_SIZE_BASE_REF: origin/main
+
 jobs:
   # Planning gate for the native platform matrix. Pull requests that touch
   # native, lock, IPC, publication, backup, export or sync paths run every

@@ -66,9 +66,7 @@ describe('checkPackUpgradeAvailable', () => {
     await withEnv({ GBRAIN_HOME: emptyHome(), GBRAIN_SCHEMA_PACK: undefined }, async () => {
       const result = await checkPackUpgradeAvailable(engine);
       expect(result.check.name).toBe('pack_upgrade_available');
-      // Fork: an available successor is an opt-in nudge, so status is ok;
-      // the hint message + manual_only remediation are the signal.
-      expect(result.check.status).toBe('ok');
+      expect(result.check.status).toBe('warn');
       expect(result.check.message).toContain('gbrain-base-v2');
       expect(result.remediations.length).toBe(1);
       expect(result.remediations[0].job).toBe('unify-types');

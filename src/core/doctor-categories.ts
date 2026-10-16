@@ -404,7 +404,7 @@ export function categorizeCheck(name: string): CheckCategory {
   if (!_warnedUnknown.has(name)) {
     _warnedUnknown.add(name);
     process.stderr.write(
-      `[doctor] internal: check '${name}' has no category; counting under 'meta'.\n`,
+      `[doctor-categories] unknown check name '${name}' — defaulting to 'meta'. Add it to src/core/doctor-categories.ts.\n`,
     );
   }
   return 'meta';

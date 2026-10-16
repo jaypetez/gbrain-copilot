@@ -165,7 +165,7 @@ describe('categorizeCheck', () => {
     try {
       expect(categorizeCheck('pack_upgrade_available')).toBe('meta');
       expect(categorizeCheck('type_proliferation')).toBe('meta');
-      expect(captured.filter((c) => c.includes('[doctor] internal'))).toEqual([]);
+      expect(captured.filter((c) => c.includes('[doctor-categories]'))).toEqual([]);
     } finally {
       (process.stderr as { write: typeof process.stderr.write }).write = originalWrite;
     }

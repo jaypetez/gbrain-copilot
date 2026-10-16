@@ -28,7 +28,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { withEnv } from './helpers/with-env.ts';
 import { runCli } from './helpers/cli-spawn.ts';
-import { buildChecks, computeDoctorReport, computeExitCode, type Check } from '../src/commands/doctor.ts';
+import { buildChecks, computeDoctorReport, type Check } from '../src/commands/doctor.ts';
 import { getDbUrlSource } from '../src/core/config.ts';
 import { MIGRATION_VERSIONS } from '../src/core/migration-ledger.ts';
 
@@ -42,7 +42,7 @@ let tmp: string;
  * doctor runs filesystem-only (half-migrated checks need no DB). Sibling test
  * files' env mutations can't poison this: withEnv overrides GBRAIN_HOME for
  * the duration of the call instead of inheriting a leaked value. exitCode is
- * derived exactly the way runDoctor derives it (fork contract: 0 healthy / 1 warnings / 2 failures), and
+ * derived exactly the way runDoctor derives it (unhealthy → 1), and
  * getDbUrlSource() is computed inside the env scope, matching the --fast
  * dispatch in src/cli.ts.
  */
@@ -52,7 +52,7 @@ async function runFastChecks(): Promise<{ exitCode: number; checks: Check[] }> {
     async () => {
       const checks = await buildChecks(null, ['--fast', '--json'], getDbUrlSource());
       return {
-        exitCode: computeExitCode(computeDoctorReport(checks)),
+        exitCode: computeDoctorReport(checks).status === 'unhealthy' ? 1 : 0,
         checks,
       };
     },
@@ -87,8 +87,8 @@ describe('gbrain doctor — half-migrated Minions detection', () => {
 
     // --fast skips the DB section entirely (no engine configured).
     const result = await runFastChecks();
-    // doctor exits 2 on any FAIL (fork contract 0/1/2); expected here.
-    expect(result.exitCode).toBe(2);
+    // doctor exits 1 on any FAIL; that's expected here.
+    expect(result.exitCode).toBe(1);
     const checks = result.checks;
     const minions = checks.find(c => c.name === 'minions_migration');
     expect(minions).toBeDefined();
@@ -170,7 +170,7 @@ describe('gbrain doctor — half-migrated Minions detection', () => {
     );
 
     const result = await runFastChecks();
-    expect(result.exitCode).toBe(2);
+    expect(result.exitCode).toBe(1);
     const checks = result.checks;
     const minions = checks.find(c => c.name === 'minions_migration');
     expect(minions!.status).toBe('fail');
@@ -209,12 +209,10 @@ describe('gbrain doctor — half-migrated Minions detection', () => {
     if (minions) {
       expect(minions.status).not.toBe('fail');
     }
-    // Critically: the stale partial flag would have produced a FAIL-level
-    // exit under the old (no-override) logic. Under the override, no check
-    // FAILs, so the exit code is never 2 (issue #5 contract: 2 = failures).
-    // It may still be 1: --fast skips DB checks with a warn-level
-    // `connection` entry, and warnings now exit 1 instead of 0.
-    expect(result.exitCode).not.toBe(2);
+    // Critically: the test fixture would have caused exit 1 under the old
+    // (no-override) logic because of the stale partial flag. Under the new
+    // logic, doctor exits 0 (or only warns about non-related checks).
+    expect(result.exitCode).toBe(0);
   });
 
   test('filesystem: stale partial NOT superseded → still flagged', async () => {
@@ -232,7 +230,7 @@ describe('gbrain doctor — half-migrated Minions detection', () => {
     );
 
     const result = await runFastChecks();
-    expect(result.exitCode).toBe(2);
+    expect(result.exitCode).toBe(1);
     const checks = result.checks;
     const minions = checks.find(c => c.name === 'minions_migration');
     expect(minions!.status).toBe('fail');
@@ -259,9 +257,7 @@ describe('gbrain doctor — half-migrated Minions detection', () => {
     const minions = result.checks.find(c => c.name === 'minions_migration');
     expect(minions!.status).toBe('warn');
     expect(minions!.message).toBe('1 host migration(s) not run yet: 0.53.0. Run: gbrain apply-migrations --yes');
-    // Warn-level only (no FAIL): fork contract 0/1/2 -> 1. (--fast also adds a
-    // warn-level `connection` entry; a Bun-too-old env adds a fail -> 2.)
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
   });
 
   test('C-NEW-3: a host migration a newer one skipped past is reported as never run', async () => {
@@ -285,7 +281,7 @@ describe('gbrain doctor — half-migrated Minions detection', () => {
     );
 
     const result = await runCli(['doctor', '--fast'], { home: tmp });
-    expect(result.exitCode).toBe(2);
+    expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain('MINIONS HALF-INSTALLED');
     expect(result.stdout).toContain('gbrain apply-migrations --yes');
   }, 60_000);

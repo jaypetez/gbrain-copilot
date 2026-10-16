@@ -517,8 +517,7 @@ export async function runDoctor(
   if (args.includes('--probe') && !(await (await import('./doctor/probe-consent.ts')).authorizeProviderProbe(engine, args, jsonOutput))) return;
   const checks = await buildChecks(engine, args, dbSource, connectError, deadline);
   const run = doctorRunSummary(args, deadline);
-  const report = outputResults(checks, jsonOutput, { engine: engine?.kind, db_url_source: dbSource ?? null, run });
-  const hasFail = report.status === 'unhealthy';
+  const hasFail = outputResults(checks, jsonOutput, { engine: engine?.kind, db_url_source: dbSource ?? null, run });
 
   // Features teaser (non-JSON, non-failing only; never under the ops deadline)
   if (!jsonOutput && !hasFail && engine && run?.tier !== 'ops') {
@@ -532,8 +531,7 @@ export async function runDoctor(
   // Use process.exitCode instead of process.exit() so cleanup handlers
   // (e.g. Bun unload events, open database connections) still run before
   // the process terminates. process.exit() is a hard kill that bypasses them.
-  // Exit-code contract (fork issue #5): 0 = healthy, 1 = warnings, 2 = failures.
-  setCliExitVerdict(computeExitCode(report));
+  setCliExitVerdict(hasFail ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -552,7 +550,7 @@ function outputResults(
   checks: Check[],
   json: boolean,
   extras?: { engine?: 'postgres' | 'pglite'; db_url_source?: DbUrlSource | null; run?: DoctorRunSummary },
-): DoctorReport {
+): boolean {
   // v0.41.19.0 — render goes through computeDoctorReport so the human
   // output, JSON output, and remote MCP envelope all share one shape.
   const report = computeDoctorReport(checks, extras);
@@ -562,7 +560,7 @@ function outputResults(
 
   if (json) {
     void writeJsonDocument(JSON.stringify(report)); // D2: the one --json document
-    return report;
+    return hasFail;
   }
 
   console.log('\nGBrain Health Check');
@@ -625,22 +623,7 @@ function outputResults(
   } else {
     console.log(`Overall health score: ${score}/100. All checks passed.`);
   }
-  return report;
-}
-
-/**
- * Map a doctor report to the CLI exit code:
- *   0 - healthy (every check ok)
- *   1 - warnings (at least one warn, no fails)
- *   2 - failures (at least one fail)
- *
- * Pure + exported so scripts and tests can pin the contract without
- * spawning the CLI.
- */
-export function computeExitCode(report: Pick<DoctorReport, 'status'>): 0 | 1 | 2 {
-  if (report.status === 'unhealthy') return 2;
-  if (report.status === 'warnings') return 1;
-  return 0;
+  return hasFail;
 }
 
 /**
