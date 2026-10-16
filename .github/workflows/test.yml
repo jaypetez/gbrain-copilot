@@ -387,6 +387,10 @@ jobs:
       - run: bun run verify
         env:
           GBRAIN_TEST_RECEIPT_DIR: ${{ runner.temp }}/receipts
+          # Fork: base branch is main; ubuntu-latest (2 cores) is slower than the
+          # runners upstream tunes the 120s default for.
+          GBRAIN_MIGRATION_BASE_REF: origin/main
+          GBRAIN_VERIFY_TIMEOUT: '300'
           GBRAIN_VERIFY_LOG_DIR: ${{ runner.temp }}/verify-logs
       - name: Upload verify logs
         if: failure()

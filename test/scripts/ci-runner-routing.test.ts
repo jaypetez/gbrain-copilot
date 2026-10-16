@@ -20,7 +20,8 @@ const arm = 'ubicloud-standard-4-arm-ubuntu-2404';
 const targetRunners = (job: Job) =>
   JSON.parse(/fromJSON\('([^']+)'\)\[matrix\.target\]/.exec(job['runs-on']!)![1]!) as Record<string, string>;
 
-describe('CI runner routing', () => {
+// Fork (gbrain-copilot): pins upstream's CI topology (Ubicloud runners / nightly schedules); the fork runs on GitHub-hosted runners with schedules off.
+describe.skip('CI runner routing', () => {
   test('owned Linux validation jobs use Ubicloud without moving release publishing', () => {
     for (const file of ['test.yml', 'e2e.yml', 'heavy-tests.yml', 'persistence-validation.yml', 'convergence-nightly.yml', 'native-locks.yml', 'actionlint.yml', 'semgrep.yml']) {
       for (const job of Object.values(load(file).jobs)) {

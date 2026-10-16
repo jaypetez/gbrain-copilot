@@ -231,7 +231,8 @@ describe('.github/nightly-known-red.tsv', () => {
 });
 
 describe('nightly-watch coverage ratchet', () => {
-  test('every workflow with a schedule trigger is watched', () => {
+  // Fork (gbrain-copilot): pins upstream's CI topology (Ubicloud runners / nightly schedules); the fork runs on GitHub-hosted runners with schedules off.
+  test.skip('every workflow with a schedule trigger is watched', () => {
     const dir = join(ROOT, '.github/workflows');
     const watch = loadYaml(readFileSync(join(dir, 'nightly-watch.yml'), 'utf8')) as { on: { workflow_run: { workflows: string[] } } };
     const scheduled = readdirSync(dir).filter(f => f.endsWith('.yml')).map(f => loadYaml(readFileSync(join(dir, f), 'utf8')) as { name: string; on?: { schedule?: unknown } })

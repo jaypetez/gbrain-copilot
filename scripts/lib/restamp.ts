@@ -163,7 +163,17 @@ export const STAMPS: Stamp[] = [
 ];
 
 /** Files restamp keeps in step beyond STAMPS (named so the coverage test can match the CLAUDE.md table). */
-export const OTHER_STAMPED_FILES = ['CHANGELOG.md', 'TODOS.md', 'templates/bootstrap/template-repo/'];
+export const OTHER_STAMPED_FILES = [
+  'CHANGELOG.md',
+  'TODOS.md',
+  'templates/bootstrap/template-repo/',
+  // Fork (gbrain-copilot) Copilot manifests: restamp does not rewrite these;
+  // they are stamped by hand + scripts/build-copilot-plugin.sh and gated by
+  // scripts/check-fork-hygiene.sh.
+  'plugin.json',
+  '.github/plugin/marketplace.json',
+  'plugins/gbrain/plugin.json',
+];
 
 /** Rewrite `vOLD` to `vNEW` in branch-added TODOS.md lines (1-based line numbers). */
 export function restampTodoLines(text: string, addedLines: Set<number>, oldVersion: string, newVersion: string): string {

@@ -111,6 +111,13 @@ Copilot CLI prompts per tool use. Pre-approve gbrain for a session with
   mcp-config.json.** It is a long-lived full-access secret; never echo it
   into chat output or shell history.
 
+## When it fails
+
+Follow the [agent operator protocol](../conventions/agent-operator-protocol.md) for any gbrain error `code`, exit code, `[AGENT]` block or notice block. Specific to this skill:
+
+- Copilot shows no gbrain tools: re-run the verify steps above, then match the symptom in Troubleshooting; never edit `mcp-config.json` without telling the user.
+- `gbrain doctor` exits 1 (warnings) or 2 (failures) in this fork: read the `fix` on each non-ok check instead of retrying.
+
 ## Output Format
 
 After wiring, report to the user:

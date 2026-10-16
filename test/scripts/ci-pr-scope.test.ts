@@ -169,7 +169,8 @@ esac
   // the condition: parity, or a named exception naming its covering scheduled
   // run (docs/TESTING.md#event-parity). Manual dispatch modes are documented
   // at test.yml's inputs and stripped before scanning.
-  test('every event-conditional job or block in a test workflow carries its event-parity classification', () => {
+  // Fork (gbrain-copilot): pins upstream's CI topology (Ubicloud runners / nightly schedules); the fork runs on GitHub-hosted runners with schedules off.
+  test.skip('every event-conditional job or block in a test workflow carries its event-parity classification', () => {
     const conditional = /github\.event_name|github\.event\.(?:pull_request|merge_group|action)|inputs\.scope|"\$EVENT"|\$EVENT\b/;
     const dispatchMode = /github\.event_name\s*(?:!=|==)\s*'workflow_dispatch'/g;
     const unclassified: string[] = [];
@@ -252,7 +253,8 @@ esac
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
-  test('the convergence job runs the PR cell on every event and skips only on the selector; the nightly cell runs only in its own workflow', () => {
+  // Fork (gbrain-copilot): pins upstream's CI topology (Ubicloud runners / nightly schedules); the fork runs on GitHub-hosted runners with schedules off.
+  test.skip('the convergence job runs the PR cell on every event and skips only on the selector; the nightly cell runs only in its own workflow', () => {
     const job = load('persistence-validation.yml').jobs.convergence!;
     expect(evaluate(job.if!, { inputs: { convergence: 'skip' } })).toBe(false);
     for (const convergence of ['run', undefined]) expect(evaluate(job.if!, { inputs: { convergence } })).toBe(true);

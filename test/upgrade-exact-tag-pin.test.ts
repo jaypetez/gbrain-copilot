@@ -71,13 +71,13 @@ describe('#5311 bare upgrade on an exact-tag pin', () => {
       expect(r.stderr).toContain('Upgrade did not take effect');
       expect(r.stderr).toContain(`pinned to github:garrytan/gbrain#v${VERSION}`);
       // #5034 / B-NEW-5: remove before add; an in-place global tag swap fails (Bun 1.3) or silently corrupts the lock (Bun 1.4).
-      expect(r.stderr).toContain('bun remove -g gbrain && bun add -g github:garrytan/gbrain');
+      expect(r.stderr).toContain('bun remove -g gbrain && bun add -g github:jaypetez/gbrain-copilot');
       expect(r.stderr).not.toContain('not published yet');
       expect(readFileSync(join(r.home, 'bun-calls.log'), 'utf-8')).toContain('update gbrain');
       // No false "just upgraded" breadcrumb for an upgrade that never happened.
       expect(existsSync(join(r.home, '.gbrain', 'just-upgraded-from'))).toBe(false);
       const errors = readFileSync(join(r.home, '.gbrain', 'upgrade-errors.jsonl'), 'utf-8').trim().split('\n').map(l => JSON.parse(l));
-      expect(errors.some(e => e.phase === 'verify-pin' && e.hint.startsWith('bun remove -g gbrain && bun add -g github:garrytan/gbrain'))).toBe(true);
+      expect(errors.some(e => e.phase === 'verify-pin' && e.hint.startsWith('bun remove -g gbrain && bun add -g github:jaypetez/gbrain-copilot'))).toBe(true);
     } finally {
       rmSync(r.home, { recursive: true, force: true });
     }
@@ -85,8 +85,8 @@ describe('#5311 bare upgrade on an exact-tag pin', () => {
 
   test('every reinstall hint removes the global package before adding the tag (#5034, B-NEW-5)', () => {
     // #6662: a tag reinstall first proves the tag exists, so a missing tag stops before the removal.
-    expect(bunReinstallCommand('#v0.60.1.0')).toBe('git ls-remote --exit-code --tags https://github.com/garrytan/gbrain refs/tags/v0.60.1.0 && bun remove -g gbrain && bun add -g github:garrytan/gbrain#v0.60.1.0');
-    expect(bunReinstallCommand('')).toBe('bun remove -g gbrain && bun add -g github:garrytan/gbrain');
+    expect(bunReinstallCommand('#v0.60.1.0')).toBe('git ls-remote --exit-code --tags https://github.com/jaypetez/gbrain-copilot refs/tags/v0.60.1.0 && bun remove -g gbrain && bun add -g github:jaypetez/gbrain-copilot#v0.60.1.0');
+    expect(bunReinstallCommand('')).toBe('bun remove -g gbrain && bun add -g github:jaypetez/gbrain-copilot');
   });
 
   test('an unpinned install that is already current still succeeds', async () => {

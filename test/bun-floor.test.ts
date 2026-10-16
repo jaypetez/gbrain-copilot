@@ -102,7 +102,7 @@ describe('release package.json', () => {
     expect(fetched).toEqual(['https://raw.githubusercontent.com/garrytan/gbrain/v0.70.0/package.json']);
 
     globalThis.fetch = (async () => new Response('Not Found', { status: 404 })) as unknown as typeof fetch;
-    expect(await readPackageTarget(null)).toEqual({ ok: false, failedRead: 'GET https://raw.githubusercontent.com/garrytan/gbrain/HEAD/package.json returned HTTP 404' });
+    expect(await readPackageTarget(null)).toEqual({ ok: false, failedRead: 'GET https://raw.githubusercontent.com/jaypetez/gbrain-copilot/HEAD/package.json returned HTTP 404' });
     globalThis.fetch = (async () => { throw new Error('network down'); }) as unknown as typeof fetch;
     expect((await readPackageTarget(null)).ok).toBe(false);
     expect((await readPackageTarget('^1.3.0')).ok).toBe(false);
