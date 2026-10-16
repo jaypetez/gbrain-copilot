@@ -1,32 +1,89 @@
-/**
- * Cross-platform postinstall (replaces the POSIX `command -v ... 1>&2`
- * one-liner, which bun's Windows shell cannot parse).
- *
- * If the gbrain CLI is already on PATH (global installs), run schema
- * migrations. Otherwise — or on any failure — print the manual-recovery
- * hint and exit 0: postinstall must never fail the install itself.
- */
-import { spawnSync } from 'child_process';
+#!/usr/bin/env bun
+// scripts/postinstall.ts
+//
+// Postinstall hook: after `bun install`, apply any pending schema migrations so
+// a freshly-installed gbrain is immediately usable. Wired via package.json
+// ("postinstall": "bun run scripts/postinstall.ts") as a real Bun script rather
+// than an inline `node -e` one-liner.
+//
+// Why a script file and not an inline command:
+//   Embedding a program inside the package.json postinstall string lets the
+//   lifecycle shell mangle it. Bun's Windows script-runner expands `\n` in the
+//   hint string into a REAL newline before node sees it, producing
+//   `SyntaxError: Invalid or unexpected token` and aborting the whole install.
+//   `node` is also not guaranteed present under a Bun install (bun is the
+//   guaranteed runtime), and `shell: win32` re-opens a quoting surface. A
+//   checked-in .ts run by `bun run` sidesteps all three.
+//
+// Uses Bun APIs only — `which()` for Windows-aware PATH resolution (finds
+// gbrain.exe / gbrain.cmd) and an argv-array `Bun.spawnSync` (no shell, nothing
+// to quote). It NEVER fails the install: every path exits 0.
 
-const onWindows = process.platform === 'win32';
+import { which } from 'bun';
+
+// Repo modules load dynamically inside try/catch: a static import of a file
+// that is not on disk (a Docker dependency layer, a partial checkout) would
+// exit 1 before any line here runs and fail the whole install.
+async function runtimeRefusalMessage(): Promise<string | null> {
+  try {
+    const { unsupportedBunMessage } = await import('../src/core/runtime-version.ts');
+    return unsupportedBunMessage();
+  } catch {
+    return null;
+  }
+}
+
+// The install itself runs on the user's Bun, so this is the first place an
+// upgrade onto a newer Bun floor can say so. Nothing else here would work:
+// every gbrain command refuses until Bun is upgraded.
+const runtimeRefusal = await runtimeRefusalMessage();
+if (runtimeRefusal) {
+  console.error(`[gbrain] Installed, but gbrain will not start on this Bun.\n${runtimeRefusal}`);
+  process.exit(0);
+}
+
+// Fork: the install-docs URL comes from src/core/repo-coordinates.ts, loaded
+// dynamically so a standalone dependency layer (no src/) still works.
+async function installDocsUrl(): Promise<string> {
+  try {
+    const { GITHUB_URL } = await import('../src/core/repo-coordinates.ts');
+    return `${GITHUB_URL}#install`;
+  } catch {
+    return 'https://github.com/jaypetez/gbrain-copilot#install';
+  }
+}
+
 const HINT =
   '[gbrain] postinstall skipped. If installed via bun install -g github:...: ' +
   'run `gbrain doctor` and `gbrain apply-migrations --yes` manually. ' +
-  'See https://github.com/jaypetez/gbrain-copilot#install';
+  `See ${await installDocsUrl()}`;
+
+// #5693: under `gbrain upgrade`, post-upgrade owns migrations. Running them
+// here too would run them twice, and a slow run here outlives the install
+// timeout that `gbrain upgrade` reads as a failed upgrade.
+if (process.env.GBRAIN_UPGRADE_OWNS_MIGRATIONS === '1') {
+  console.error('[gbrain] postinstall: migrations deferred to `gbrain post-upgrade`.');
+  process.exit(0);
+}
+
+// Windows-aware PATH resolution — finds gbrain, gbrain.exe or gbrain.cmd.
+const bin = which('gbrain');
+
+if (!bin) {
+  // Fresh clone / global install where gbrain isn't on PATH yet: skip cleanly.
+  console.error(HINT);
+  process.exit(0);
+}
 
 try {
-  const probe = spawnSync('gbrain', ['--version'], { stdio: 'ignore', shell: onWindows, timeout: 15_000 });
-  if (probe.status === 0) {
-    const run = spawnSync('gbrain', ['apply-migrations', '--yes', '--non-interactive'], {
-      stdio: 'inherit',
-      shell: onWindows,
-      timeout: 600_000,
-    });
-    if (run.status !== 0) console.error(HINT);
-  } else {
-    console.error(HINT);
-  }
+  const r = Bun.spawnSync({
+    cmd: [bin, 'apply-migrations', '--yes', '--non-interactive'],
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
+  if (r.exitCode !== 0) console.error(HINT);
 } catch {
   console.error(HINT);
 }
-process.exit(0);
+
+process.exit(0); // never abort the install

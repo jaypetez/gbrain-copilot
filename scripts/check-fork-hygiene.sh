@@ -12,7 +12,8 @@
 #      fork; every shipped doc/script must point at jaypetez/gbrain-copilot.
 #      The trailing slash after "gbrain" in STALE_PATTERN keeps the
 #      legitimate sibling repo garrytan/gbrain-skillpack-registry out of
-#      the match. CHANGELOG.md is excluded (historical record).
+#      the match. CHANGELOG.md is excluded (historical record), as is
+#      scripts/check-bootstrap-tag.sh (it parses upstream URL shapes by design).
 #   3. Payload drift — plugins/gbrain/ is generated from skills/ + the
 #      gbrain agent by scripts/build-copilot-plugin.sh; a stale payload
 #      ships outdated skills to plugin installs.
@@ -64,7 +65,7 @@ URL_FILES=$(
   git ls-files \
     'llms.txt' 'llms-full.txt' 'README.md' 'COPILOT.md' 'INSTALL_FOR_AGENTS.md' \
     'docs/**' 'skills/**' 'scripts/**' 'plugins/**' \
-  2>/dev/null | grep -v '^CHANGELOG\.md$' | sort -u
+  2>/dev/null | grep -v -e '^CHANGELOG\.md$' -e '^scripts/check-bootstrap-tag\.sh$' | sort -u
 )
 
 while IFS= read -r f; do
