@@ -13,16 +13,15 @@ fork owns an identity layer that must survive every merge.
 ## Prerequisites
 
 - **Bun** — the whole toolchain runs on Bun (`package.json` floor is
-  `>=1.3.10`; CI pins `1.3.13` in `.github/workflows/*`). Keep local Bun at or
-  above the CI pin so "green locally" means "green in CI". Install from
-  <https://bun.sh>.
+  `>=1.4.0`; CI pins `1.4.3` in `.github/workflows/*`). Keep local Bun at or
+  above the CI pin so "green locally" means "green in CI" (`bun upgrade`).
+  Install from <https://bun.sh>.
 - **git**, **gh** (GitHub CLI), and **Node** (used by a few scripts).
 
-> **Windows note.** `bun run typecheck` and `bun run build` work natively, but
-> `bun run verify` and `bun run test` do **not** — the guard aliases in
-> `package.json` are bare `.sh` paths (e.g. `"check:fork-hygiene":
-> "scripts/check-fork-hygiene.sh"`) that bun's Windows shell can't launch
-> (`bun: command not found`). Run individual guards directly with
+> **Windows note.** `bun run typecheck` and `bun run build` work natively.
+> `bun run verify` / `bun run test` may not: some guards need a POSIX shell, and
+> `scripts/check-privacy.sh` aborts inside Git Bash's `grep` (exit 134). Run
+> individual guards directly with
 > `bash scripts/check-*.sh`, run the full suite under **WSL / Git Bash**, or
 > just rely on **CI** as the authoritative gate. A few guards also can't pass
 > natively on Windows regardless (they run the compiled binary's image/WASM
@@ -84,14 +83,37 @@ Copilot packaging, so its version of these files is always wrong for the fork:
 - `scripts/install-copilot.ps1`, `scripts/install-copilot.sh`,
   `scripts/build-copilot-plugin.sh`
 - `README.md`, `COPILOT.md`, `INSTALL_FOR_AGENTS.md`
-- `.github/workflows/*` — this fork intentionally **disabled the heavy-tests
-  nightly cron** and made `e2e.yml` **dispatch-only** (Actions-minutes budget).
-  Don't let an upstream merge re-enable them.
+- `.github/workflows/*` — the fork's CI deltas, which every sync must re-apply
+  to whatever upstream changed (upstream restructures these constantly):
+  - **Runners:** upstream uses Ubicloud labels (`ubicloud-standard-N-ubuntu-2404`);
+    the fork has none, so rewrite them to `ubuntu-latest` (jobs would queue forever).
+  - **Branch:** `main`, not `master` (triggers, `origin/master` baseline fetches,
+    `blob/master` links). Leave `fix-wave-*.yml` and `nightly-watch.yml` on
+    `master` — they are upstream-maintainer governance and stay inert here.
+  - **No schedules:** every `schedule:`/cron is disabled (Actions budget); `e2e.yml`
+    is **dispatch-only** (needs API-key secrets); heavy-tests runs via label/dispatch.
+  - **Release gate:** `scripts/release-gate.ts` gates only on the `Test` workflow
+    (`GATED`) and the `main` branch (`GATE_BRANCH`); upstream also requires E2E.
+    Keep `test/scripts/release-gate.test.ts` in step.
 
 **The version trio** (`VERSION`, `package.json`, `CHANGELOG.md`) — follow the
 "Merge-conflict recovery procedure" in `CLAUDE.md`. Keep the fork's version line
 (don't blindly adopt upstream's number); keep BOTH sets of CHANGELOG entries.
 `/ship` enforces trio consistency at release time.
+
+**Version stamps beyond the trio** — upstream's version table now also includes
+`openclaw.plugin.json`, `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`,
+`BOOTSTRAP_FOR_AGENTS.md` (line-1 stamp) and `templates/bootstrap/template-repo/`
+(regenerate: `bun run scripts/generate-template-repo.ts --out templates/bootstrap/template-repo`),
+in addition to the fork's `plugin.json`, `.github/plugin/marketplace.json` and
+`plugins/gbrain/plugin.json`. Bump them all to the new `VERSION`.
+
+**Peeled/restructured files** — when upstream splits a file the fork modified
+(e.g. `doctor.ts`, `cli.ts`, `operations.ts`), take upstream's version
+(`git checkout --theirs`) and re-apply the fork's small deltas
+(`git diff <merge-base> HEAD -- <file>`) onto the new locations rather than
+hand-merging conflict hunks. Fork URL repoints must import from
+`src/core/repo-coordinates.ts`.
 
 **Everything else** — merge on the merits. Upstream's `src/` fixes and new tests
 are the whole point of tracking upstream.
@@ -103,6 +125,7 @@ bun install                                    # refresh bun.lock against merged
 # Regenerate committed-but-generated artifacts (see next section)
 bun run build:llms
 bash scripts/build-copilot-plugin.sh
+bun run scripts/generate-plugin-tree.ts --out plugin --variants-out plugin-variants
 # Prove it's green + no upstream leakage:
 bun run typecheck   > out-tc.txt  2>&1; echo "EXIT=$?"
 bun run verify      > out-ver.txt 2>&1; echo "EXIT=$?"

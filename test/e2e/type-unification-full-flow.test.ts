@@ -13,15 +13,37 @@
 //   - re-running is idempotent (total_applied: 0)
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
 import { resetPgliteState } from '../helpers/reset-pglite.ts';
 import { runUnifyTypes } from '../../src/core/schema-pack/unify-types-handler.ts';
 import { runAllOnboardChecks } from '../../src/core/onboard/checks.ts';
 import { _resetPackCacheForTests } from '../../src/core/schema-pack/registry.ts';
+import { withEnv, emptyHome } from '../helpers/with-env.ts';
 
 let engine: PGLiteEngine;
 
+// GBRAIN_HOME isolation (in-process; configDir() reads process.env at call
+// time). Two leaks without it, both through the file-plane config:
+//   1. checkPackUpgradeAvailable() reads loadConfigFileOnly() — an ambient
+//      ~/.gbrain/config.json carrying `schema_pack: gbrain-base-v2` (any
+//      machine whose brain already unified) makes the pre-unify check return
+//      'ok' instead of 'warn' and the first test fails.
+//   2. runUnifyTypes({apply: true}) WRITES the flip via saveConfig() — under
+//      bare `bun test` that lands in the operator's REAL config (the exact
+//      breach scripts/run-e2e.sh's md5 check exists to catch), and under the
+//      full e2e lane it lands in the wrapper's shared tmp HOME, poisoning
+//      every later loadActivePack caller in the same invocation.
+// Same in-process pattern as test/preferences.test.ts.
+let tmpHome: string;
+let origGbrainHome: string | undefined;
+
 beforeAll(async () => {
+  origGbrainHome = process.env.GBRAIN_HOME;
+  tmpHome = mkdtempSync(join(tmpdir(), 'gbrain-type-uni-e2e-'));
+  process.env.GBRAIN_HOME = tmpHome;
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
@@ -29,11 +51,17 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await engine.disconnect();
+  if (origGbrainHome === undefined) delete process.env.GBRAIN_HOME;
+  else process.env.GBRAIN_HOME = origGbrainHome;
+  try { rmSync(tmpHome, { recursive: true, force: true }); } catch { /* best-effort */ }
 });
 
 beforeEach(async () => {
   await resetPgliteState(engine);
   _resetPackCacheForTests();
+  // The first test's apply flips schema_pack in the isolated file-plane
+  // config; wipe it so every test starts pre-unify (order-independence).
+  try { rmSync(join(tmpHome, '.gbrain'), { recursive: true, force: true }); } catch { /* best-effort */ }
 });
 
 function ctxOf() {
@@ -115,12 +143,16 @@ describe('v0.42 type-unification E2E (IRON RULE)', () => {
     const preDistinct = parseInt(preTypes[0].cnt, 10);
     expect(preDistinct).toBeGreaterThanOrEqual(20);
 
-    // Onboard surfaces pack_upgrade_available (ok + hint per issue #5 —
-    // the remediation step is the actionable signal, not a warn status)
-    const checks = await runAllOnboardChecks(engine);
+    // Onboard surfaces pack_upgrade_available. checkPackUpgradeAvailable
+    // honors tier-6 file-plane config (v0.42.66.0, #3396), so hide the dev
+    // machine's real ~/.gbrain/config.json schema_pack for this assertion —
+    // otherwise the check reports 'ok' locally while 'warn' in CI.
+    const checks = await withEnv(
+      { GBRAIN_HOME: emptyHome(), GBRAIN_SCHEMA_PACK: undefined },
+      () => runAllOnboardChecks(engine),
+    );
     const packUpgrade = checks.find(c => c.check.name === 'pack_upgrade_available');
-    expect(packUpgrade?.check.status).toBe('ok');
-    expect(packUpgrade?.check.message).toContain('Successor available');
+    expect(packUpgrade?.check.status).toBe('warn');
     expect(packUpgrade?.remediations[0]?.job).toBe('unify-types');
 
     // Dry-run
@@ -176,13 +208,10 @@ describe('v0.42 type-unification E2E (IRON RULE)', () => {
     expect(linkRows.length).toBe(1);
     expect(linkRows[0].link_type).toBe('partner_of');
 
-    // Onboard checks clear post-unify. Since pack_upgrade_available is now
-    // ok in BOTH states (issue #5), pin the message to prove the successor
-    // hint actually cleared.
+    // Onboard checks clear post-unify
     const checksAfter = await runAllOnboardChecks(engine);
     const packUpgradeAfter = checksAfter.find(c => c.check.name === 'pack_upgrade_available');
     expect(packUpgradeAfter?.check.status).toBe('ok');
-    expect(packUpgradeAfter?.check.message).not.toContain('Successor available');
     const typeProlifAfter = checksAfter.find(c => c.check.name === 'type_proliferation');
     expect(typeProlifAfter?.check.status).toBe('ok');
 
