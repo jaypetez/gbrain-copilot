@@ -56,7 +56,6 @@ interface CheckUpdateResult {
 function upgradeCommandForMethod(method: string): string {
   switch (method) {
     case 'bun': return 'bun update gbrain';
-    case 'clawhub': return 'clawhub update gbrain';
     case 'binary': return 'gbrain self-upgrade';
     default: return 'gbrain upgrade';
   }

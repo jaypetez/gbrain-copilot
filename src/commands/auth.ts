@@ -19,15 +19,14 @@
  * postgres.js singleton. `test` only hits a remote URL and doesn't need
  * a local DB.
  */
-import { createHash } from 'crypto';
 import { loadConfig, toEngineConfig } from '../core/config.ts';
 import { createEngine } from '../core/engine-factory.ts';
 import type { BrainEngine } from '../core/engine.ts';
 import { assertAllowedScopes } from '../core/scope.ts';
 import { isTrustTier, TRUST_TIERS, type TrustTier } from '../core/trust/tier.ts';
-import { setMinTrust, setTokenMinTrust } from '../core/trust/min-trust.ts';
-import { generateToken, isMissingSchemaObject } from '../core/utils.ts';
-import { TOKEN_ID_RE, insertUnifiedToken } from '../core/token-mint.ts';
+import { setMinTrust } from '../core/trust/min-trust.ts';
+import { isMissingSchemaObject } from '../core/utils.ts';
+import { TOKEN_ID_RE } from '../core/token-mint.ts';
 import { normalizeTokenScopes } from '../core/legacy-token-scope.ts';
 import { sqlQueryForEngine, type SqlQuery } from '../core/sql-query.ts';
 import type { OAuthTransaction } from '../core/oauth-grants.ts';
@@ -39,12 +38,10 @@ import type { INSTALL_SURFACE_SET_BY } from '../mcp/surface.ts';
 import { migrateLegacyTokens, parseRescopeTokenArgs, renderLegacyGrantAxis, rescopeLegacyToken, resolveRescopeTarget, type MigrateLegacyResult, type RescopeTokenResult } from '../core/grants/legacy-token.ts';
 import { bindCredential, type BindingPatch, type BindingResult } from '../core/access/members.ts';
 import { bindingLine, checkBindingTarget, takeBindingFlags } from './auth-binding.ts';
+import { mintToken } from './auth-mint.ts';
+import { assertCredentialScoped, logReadsUnscopedChange } from '../core/access/requester-scope.ts';
 import { exitCliError } from '../cli/cli-error.ts';
 import { OperationError } from '../core/ops/contract.ts';
-
-function hashToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
-}
 
 /**
  * Acquire an engine from the active config, run `fn` with a SqlQuery, and
@@ -80,7 +77,7 @@ async function withConfiguredSql<T>(
 }
 
 async function create(name: string, opts: { takesHolders?: string[]; scopes?: string[]; minTrust?: TrustTier; binding?: BindingPatch | null } = {}) {
-  if (!name) { console.error('Usage: auth create <name> [--takes-holders world,garry] [--scopes read,write] [--min-trust <tier>]'); process.exit(1); }
+  if (!name) { console.error('Usage: auth create <name> [--takes-holders world,garry] [--scopes read,write] [--min-trust <tier>] [--member <id>] [--reads-unscoped --yes]'); process.exit(1); }
   // #4043 least-privilege: validate scopes at mint time — the verify path
   // treats a filtered-empty scopes array as DENY, so a typo must fail loudly
   // here, never silently brick (or widen) the token.
@@ -93,28 +90,11 @@ async function create(name: string, opts: { takesHolders?: string[]; scopes?: st
       process.exit(1);
     }
   }
-  const token = generateToken('gbrain_');
-  const hash = hashToken(token);
-
   try {
     await withConfiguredSql(async (_sql, engine) => {
-      // v0.28: persist per-token takes-holder allow-list. Default ['world'] keeps
-      // private hunches hidden from MCP-bound tokens.
-      const takesHolders = opts.takesHolders && opts.takesHolders.length > 0
-        ? opts.takesHolders
-        : ['world'];
-      await checkBindingTarget(engine, opts.binding ?? null);
-      // F3: the token is born on the unified grant shape (columns + the
-      // permissions JSONB mirror older binaries read). Scopes land in the
-      // original-schema scopes TEXT[] column; omitted → NULL → the historical
-      // grandfathered full-access grant.
-      const [row] = await insertUnifiedToken(engine, {
-        name, tokenHash: hash, ...(opts.scopes !== undefined ? { scopes: opts.scopes } : {}),
-        grant: { sources: { kind: 'default' }, takesHolders, allowedOperations: null },
-      });
-      // #5575 (CEO-18): the read floor; the CLI is the only writer of it.
-      if (opts.minTrust) await setTokenMinTrust(engine, row!.id, opts.minTrust);
-      const bound = opts.binding ? await bindCredential(engine, { kind: 'token', id: String(row!.id) }, opts.binding) : null;
+      await assertCredentialScoped(engine, opts.binding ?? null, 'token', name);
+      const { token, takesHolders, bound } = await mintToken(engine, name, opts);
+      if (bound) auditReadsUnscoped(bound, `token ${name}`, false);
       const scopeLine = opts.scopes !== undefined
         ? `scopes=${JSON.stringify(opts.scopes)}`
         : 'scopes=full access (grandfathered — pass --scopes read,write to narrow)';
@@ -776,7 +756,7 @@ export function formatRegisterClientOutput(name: string, r: RegisteredClient, pa
 
 async function registerClient(name: string, args: string[]) {
   if (!name) {
-    console.error('Usage: auth register-client <name> [--grant-types G] [--scopes S] [--source SOURCE] [--federated-read SRC1,SRC2,...] [--redirect-uri URI ...] [--token-endpoint-auth-method client_secret_post|client_secret_basic|none] [--bound-tools T1,T2] [--bound-source SOURCE] [--bound-brain BRAIN] [--bound-slug-prefixes P1,P2] [--bound-max-concurrent N] [--budget-usd-per-day USD] [--token-ttl SECONDS]');
+    console.error('Usage: auth register-client <name> [--grant-types G] [--scopes S] [--source SOURCE] [--federated-read SRC1,SRC2,...] [--redirect-uri URI ...] [--token-endpoint-auth-method client_secret_post|client_secret_basic|none] [--bound-tools T1,T2] [--bound-source SOURCE] [--bound-brain BRAIN] [--bound-slug-prefixes P1,P2] [--bound-max-concurrent N] [--budget-usd-per-day USD] [--token-ttl SECONDS] [--member <id>] [--reads-unscoped --yes]');
     process.exit(1);
   }
   let parsed: RegisterClientArgs;
@@ -786,18 +766,20 @@ async function registerClient(name: string, args: string[]) {
     parsed = parseRegisterClientArgs(binding.args);
   } catch (e: any) {
     console.error(`Error: ${e.message}`);
-    console.error('Usage: auth register-client <name> [--grant-types G] [--scopes S] [--source SOURCE] [--federated-read SRC1,SRC2,...] [--redirect-uri URI ...] [--token-endpoint-auth-method client_secret_post|client_secret_basic|none] [--bound-tools T1,T2] [--bound-source SOURCE] [--bound-brain BRAIN] [--bound-slug-prefixes P1,P2] [--bound-max-concurrent N] [--budget-usd-per-day USD] [--token-ttl SECONDS]');
+    console.error('Usage: auth register-client <name> [--grant-types G] [--scopes S] [--source SOURCE] [--federated-read SRC1,SRC2,...] [--redirect-uri URI ...] [--token-endpoint-auth-method client_secret_post|client_secret_basic|none] [--bound-tools T1,T2] [--bound-source SOURCE] [--bound-brain BRAIN] [--bound-slug-prefixes P1,P2] [--bound-max-concurrent N] [--budget-usd-per-day USD] [--token-ttl SECONDS] [--member <id>] [--reads-unscoped --yes]');
     process.exit(1);
   }
 
   try {
     await withConfiguredSql(async (sql, engine) => {
       await checkBindingTarget(engine, binding.patch);
+      await assertCredentialScoped(engine, binding.patch, 'client', name);
       const columns = parsed.tokenTtlSeconds !== undefined
         ? await preflightOauthClientColumns(sql)
         : undefined;
       const registered = await registerScopedClient(sql, name, parsed, { columns, transaction: fn => engine.transaction(tx => fn(sqlQueryForEngine(tx))) });
       const bound = binding.patch ? await bindCredential(engine, { kind: 'client', id: registered.clientId }, binding.patch) : null;
+      if (bound) auditReadsUnscoped(bound, `OAuth client ${registered.clientId}`, false);
       if (registered.skipped?.tokenTtl) {
         console.error('Note: this brain predates the token_ttl column; run `gbrain apply-migrations --yes`, then rescope. The server default TTL applies.');
       }
@@ -871,13 +853,18 @@ async function runRescope(rawArgs: string[], clientParser?: (args: string[]) => 
       if (target.kind === 'client') {
         const clientId = target.clientId;
         const parsedClient = clientParser ? clientParser(command.args) : parseClientRescopeArgs(clientId, command.args);
-        const bindLater = async () => bindCredential(engine, { kind: 'client', id: clientId }, binding.patch!, { dryRun });
+        const bindLater = async () => {
+          const bound = await bindCredential(engine, { kind: 'client', id: clientId }, binding.patch!, { dryRun });
+          auditReadsUnscoped(bound, `OAuth client ${clientId}`, dryRun);
+          return bound;
+        };
         return rescopeClientWith(engine, clientId, parsedClient, bindLater);
       }
       const tokenArgv = command.kind === 'bare' ? [command.name, ...command.args] : command.args;
       const parsed = parseRescopeTokenArgs(tokenArgv);
       const result = await rescopeLegacyToken(engine, parsed);
       const bound = await bindCredential(engine, { kind: 'token', id: result.id }, binding.patch, { dryRun });
+      auditReadsUnscoped(bound, `token ${result.name}`, dryRun);
       printTokenRescope(result, parsed.json, bound);
     });
   } catch (error) {
@@ -892,6 +879,11 @@ async function runRescope(rawArgs: string[], clientParser?: (args: string[]) => 
     if (fix) console.error('Fix: Run gbrain auth clients --json on this brain, then retry with an existing client id. No grants or tokens changed.');
     process.exit(1);
   }
+}
+
+/** GST-363: every grant or removal of --reads-unscoped lands in the access-reads-unscoped audit trail. */
+function auditReadsUnscoped(b: BindingResult, credential: string, dryRun: boolean): void {
+  if (b.reads_unscoped !== undefined && b.changed && !dryRun) logReadsUnscopedChange({ credential, reads_unscoped: b.reads_unscoped, by: 'gbrain auth' });
 }
 
 const CLIENT_NOT_FOUND_FIX = {
@@ -1318,7 +1310,7 @@ Admin dashboard login (running HTTP server):
   This does not create an MCP bearer token. See docs/mcp/DEPLOY.md.
 
 Usage:
-  gbrain auth create <name> [--takes-holders world,garry,brain] [--scopes read,write] [--min-trust <tier>] [--member <id>]
+  gbrain auth create <name> [--takes-holders world,garry,brain] [--scopes read,write] [--min-trust <tier>] [--member <id>] [--reads-unscoped --yes]
                                                           Create a legacy bearer token. v0.28: --takes-holders
                                                           sets the per-token allow-list for the takes.holder
                                                           field (default: ["world"]). MCP-bound calls to
@@ -1330,6 +1322,9 @@ Usage:
                                                           return rows below that trust tier (${TRUST_TIERS.join(', ')});
                                                           memory_confirm in --scopes lets the token confirm
                                                           memory as you (local CLI only; never via admin API)
+                                                          On a brain that serves several people a new token needs
+                                                          --member <id>, or --reads-unscoped --yes to read every
+                                                          page no rule restricts on purpose (credential_scope_required)
   gbrain auth set-min-trust <client|token> <tier|none>    Set or clear the read floor of an OAuth client (id)
                                                           or legacy token (id or name). Local CLI only.
   gbrain auth list [--json]                                List all tokens (id, scopes, usage, private pages)
@@ -1360,6 +1355,9 @@ Usage:
                                                           the person a QM call serves (x-qm-actor; linked with gbrain
                                                           access member link); ops default get_write_request,
                                                           memory_recall,memory_write
+     --attest-read <person|scope|none>                    How an attested call that names sources reads them:
+                                                          person, or scope (every call must then name a person);
+                                                          none (default) reads them as the scope
      --private-pages <granted-sources|none>               Remote reads see visibility: private pages in the
                                                           sources this grant names explicitly (never the
                                                           no-grant floor, federation, a client's bound source
@@ -1390,6 +1388,8 @@ Usage:
      --token-endpoint-auth-method <method>                 (v0.41.3+; client_secret_post | client_secret_basic | none;
                                                             'none' = public PKCE-only client, no secret minted)
      --member <id> / --may-act-for <list>                  Bind the client to a member (see auth rescope)
+     --reads-unscoped --yes                                Read unscoped on a brain that serves several people
+                                                          (without it or --member, refused: see auth create)
      --bound-tools <tool1,tool2>                           Bind submit_agent to an allow-list of tools
      --bound-source <id>                                   Bind submit_agent jobs to a source id
      --bound-brain <id>                                    Bind submit_agent jobs to a brain id

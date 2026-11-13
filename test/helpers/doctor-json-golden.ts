@@ -23,7 +23,7 @@
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { defineNormalizer, mapStrings, scrubKeys, scrubPaths, scrubTimestamps } from './golden.ts';
 import { PROVIDER_ENV_KEYS } from './provider-env.ts';
 import { MIGRATIONS } from '../../src/core/schema-migrations/registry.generated.ts';
@@ -37,6 +37,7 @@ const CLOCK_PRELOAD = join(import.meta.dir, 'fixed-clock-preload.ts');
 const PACKAGE_VERSION = (JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf-8')) as { version: string }).version;
 const REGISTRY_LATEST = Math.max(...MIGRATIONS.map((m) => m.version));
 const SCHEMA_LATEST = /\b(Version |latest: |latest is |latest known version \()(\d+)\b/g;
+const GIT_BIN = Bun.which('git');
 
 export interface DoctorHome {
   home: string;
@@ -50,7 +51,7 @@ export interface DoctorHome {
 
 /** `opts.clock`: an ISO instant; the home's CLI processes share one clock that reads it now and moves forward from it. */
 export function makeDoctorHome(prefix: string, opts: { clock?: string } = {}): DoctorHome {
-  const home = mkdtempSync(join(tmpdir(), `gbrain-${prefix}-`));
+  const home = mkdtempSync(join(tmpdir(), `g-${prefix.slice(0, 3)}-`));
   const work = join(home, 'work');
   const skillsDir = join(home, 'skills');
   mkdirSync(work, { recursive: true });
@@ -115,7 +116,12 @@ export async function runGbrain(h: DoctorHome, args: string[], env: Record<strin
     GBRAIN_SKIP_STARTUP_HOOKS: '1',
     GBRAIN_TEST_NET_LOG: h.netLog,
     NO_COLOR: '1',
-    PATH: [join(h.home, 'bin'), '/usr/bin', '/bin'].join(delimiter),
+    TZ: 'UTC',
+    PATH: [
+      join(h.home, 'bin'),
+      ...(GIT_BIN ? [dirname(GIT_BIN)] : []),
+      ...(process.platform === 'win32' ? [] : ['/usr/bin', '/bin']),
+    ].join(delimiter),
   });
   delete childEnv.GBRAIN_TEST_CLOCK_OFFSET_MS;
   if (h.clockOffsetMs !== undefined) childEnv.GBRAIN_TEST_CLOCK_OFFSET_MS = String(h.clockOffsetMs);
@@ -160,7 +166,6 @@ export function patchConfig(h: DoctorHome, patch: (cfg: Record<string, unknown>)
 
 const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 const VOLATILE_KEYS = /(^|_)(ms|pid|elapsed|duration|uptime)$|_ms$|^elapsed|^table_bytes$|^oldest_age_seconds$/i;
-
 export function normalizeDoctorText(text: string, roots: Record<string, string>, extra: Array<[RegExp | string, string]> = []): string {
   if (Bun.semver.order(Bun.version, MINIMUM_BUN_VERSION) < 0) {
     throw new Error([
@@ -169,11 +174,17 @@ export function normalizeDoctorText(text: string, roots: Record<string, string>,
       'Fix:  bun upgrade, then rerun this test (CI and the Ubicloud gate pin the build runtime).',
     ].join('\n'));
   }
-  let out = scrubPaths(text, roots);
+  const pathRoots = Object.fromEntries(Object.entries({ ...roots, '<tmp>': tmpdir() }).map(([label, root]) => [
+    label,
+    root.replaceAll('\\', '/'),
+  ]));
+  let out = scrubPaths(process.platform === 'win32' ? text.replaceAll('\\', '/') : text, pathRoots);
+  out = out.replace(/'(<(?:home|repo|tmp)>\/[^']*)'/g, '$1');
   for (const [pattern, label] of extra) out = typeof pattern === 'string' ? out.split(pattern).join(label) : out.replace(pattern, label);
   out = scrubTimestamps(out).replace(UUID, '<uuid>');
   out = out.replace(/\(most recent caller: at [^()]*\([^()]*\)\)/g, '(most recent caller: <frame>)');
   out = out.split(PACKAGE_VERSION).join('<version>');
+  out = out.replace(/(fresh install at v)\d+\.\d+\.\d+(?:\.\d+)?/, '$1<version>');
   out = out.replace(SCHEMA_LATEST, (match, prefix: string, n: string) => (Number(n) === REGISTRY_LATEST ? `${prefix}<latest>` : match));
   out = out.split(`Bun ${Bun.version}`).join('Bun <bun-version>');
   const host = hostname();
@@ -222,7 +233,9 @@ export function doctorJsonNormalizer(extra: Array<[RegExp | string, string]> = [
       exit_code: run.exitCode,
       report: run.json === null ? null : mapStrings(maskWriterFloor(scrubKeys(run.json, VOLATILE_KEYS)), fn),
       stdout: run.json === null ? fn(run.stdout).split('\n').filter(Boolean) : '<json>',
-      stderr: fn(run.stderr).split('\n').filter(Boolean),
+      stderr: fn(run.stderr).split('\n').filter(Boolean).filter((line) =>
+        !/^\[gbrain\] still reading doctor checks \(\d+ s so far\); no result yet\.$/.test(line) &&
+        !/^\[doctor\.db_checks\] (?!start$|done$)[a-z0-9_]+$/.test(line)),
     };
   });
 }

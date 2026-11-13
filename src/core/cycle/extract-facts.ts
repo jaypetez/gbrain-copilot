@@ -81,10 +81,12 @@ import {
   type SupersessionChain,
 } from '../facts/supersede-resolve.ts';
 import { writeReceipt } from '../extract/receipt-writer.ts';
-import { fenceUnfencedFacts, planUnfencedFacts } from '../facts/unfenced-facts.ts';
+import { fenceUnfencedFacts, isFenceHold, planUnfencedFacts } from '../facts/unfenced-facts.ts';
+import { moveHeldFacts } from '../facts/held-fact-move.ts';
 import { classifyRunStop, upsertExtractRollup } from '../extract/rollup-writer.ts';
 import { factsFenceView } from '../facts-fence.ts';
 import { fenceReadOf, publishFenceGeneration, readFenceBlocks, FACT_FENCE_KIND, type FenceRead } from '../generations/fence.ts';
+import { factsFenceHeld, moveKeptRows } from '../generations/fence-evidence.ts';
 import type { BodyStorage } from '../page-body/types.ts';
 import { factFenceItems, factPreimages, factRetireItem } from '../generations/adapters/fact-rows.ts';
 import { incrementalFactsFence, segmentedBodyMatchesFile } from '../page-body/segment-facts.ts';
@@ -386,6 +388,8 @@ interface FenceReconcilePlan {
   stale: ExistingPageFact[];
   updates: FenceExtractedFact[];
   toInsert: FenceExtractedFact[];
+  /** #8819: stored rows with a row number no fence of the page ever held: never retired, moved when a new fence row claims their number. */
+  kept: number[];
   chain: SupersessionChain;
   /** Nothing to write: every row matches and every supersession pointer is in place. */
   inSync: boolean;
@@ -395,11 +399,14 @@ interface FenceReconcilePlan {
  * One page's reconcile plan against its stored rows. Null when the fence is
  * not authoritative (warnings are appended): a warning-bearing parse or a
  * fence in each section of the page (#6686: a split fence) preserves the page's existing index.
+ * `managed` (#8819): on a managed brain every page write projects its fence with the page it replaced as evidence, so a
+ * row no fence of the page ever held is not drift to wipe but a fact nobody withdrew; an unmanaged brain's reconcile
+ * keeps treating rows its fence lacks as drift.
  */
-async function planFenceReconcile(db: BrainEngine, page: PageFenceInput, slug: string, sourceId: string, warnings: string[]): Promise<FenceReconcilePlan | null> {
+async function planFenceReconcile(db: BrainEngine, page: PageFenceInput, slug: string, sourceId: string, warnings: string[], managed: boolean): Promise<FenceReconcilePlan | null> {
   // A segmented page's view and fence text come from its fences rows: only runs changed since their row was written are read.
   const segmented = isSegmentedPage(page) ? await incrementalFactsFence(db, page) : null;
-  const view = segmented?.view ?? factsFenceView(page);
+  const view = segmented?.view ?? factsFenceView({ ...page, slug });
   // #6686: a lone fence below the timeline sentinel that parses cleanly is the page's fence, read where the writers
   // edit it; one that does not parse keeps the #3625 guard below.
   const below = !view.sections.body && view.sections.timeline ? view.timeline : null;
@@ -452,14 +459,36 @@ async function planFenceReconcile(db: BrainEngine, page: PageFenceInput, slug: s
     if (desired && desired.fact === fact.fact) matched.set(desired.row_num, fact);
     else stale.push(fact);
   }
-  const updates = extracted.filter(f => {
+  // GST-2511: a contested row whose widening the owner has not accepted keeps its visibility; the fence's world cell is
+  // the lower-tier writer's request, which only the owner's accept applies (trust/fence-guard.ts).
+  const widening = extracted.flatMap(f => {
+    const fact = matched.get(f.row_num);
+    return fact && fact.visibility !== 'world' && (f.visibility ?? 'private') === 'world' ? [Number(fact.id)] : [];
+  });
+  const heldWidening = new Set(widening.length ? (await db.executeRaw<{ id: number }>(
+    `SELECT related_id AS id FROM trust_proposals WHERE source_id = $1 AND action = 'supersede_fact' AND related_table = 'facts'
+      AND related_id = ANY($2::bigint[]) AND status IN ('pending', 'rejected', 'undone') AND before_state->'visibility' IS NOT NULL`,
+    [sourceId, widening])).map(r => Number(r.id)) : []);
+  const updates = extracted.map((f): FenceExtractedFact => {
+    const fact = matched.get(f.row_num);
+    return fact && heldWidening.has(Number(fact.id)) ? { ...f, visibility: fact.visibility as FenceExtractedFact['visibility'] } : f;
+  }).filter(f => {
     const fact = matched.get(f.row_num);
     return fact !== undefined && factCellsDiffer(fact, f);
   });
   const toInsert = extracted.filter(f => !matched.has(f.row_num));
+  // #8819: on a managed brain, a stale row whose number and claim no fence of the page ever held was never in the fence,
+  // so no edit of it withdrew the row: it stays active, and a new fence row claiming its number takes that position. A
+  // row whose claim the fence states, at any number or visibility, still retires, so no wider copy of it stays active.
+  const claims = new Set(extracted.map(f => f.fact));
+  const positioned = managed ? stale.filter(fact => fact.row_num != null && !claims.has(fact.fact))
+    .map(fact => ({ id: Number(fact.id), row_num: Number(fact.row_num), fact: fact.fact, visibility: fact.visibility })) : [];
+  const { held } = await factsFenceHeld(db, { sourceId, slug, rows: positioned });
+  const kept = positioned.filter(row => !held.has(row.id)).map(row => row.id);
+  const retired = stale.filter(fact => !kept.includes(Number(fact.id)));
   const chain = supersessionChainOf(extracted, slug);
   let inSync = false;
-  if (stale.length === 0 && updates.length === 0 && toInsert.length === 0) {
+  if (retired.length === 0 && updates.length === 0 && toInsert.length === 0) {
     const byRow = new Map([...matched].map(([row, fact]) => [row, { id: Number(fact.id), struck: fact.expired_at != null }]));
     inSync = extracted.every(f => {
       const stored = matched.get(f.row_num)!.superseded_by;
@@ -467,7 +496,7 @@ async function planFenceReconcile(db: BrainEngine, page: PageFenceInput, slug: s
     });
   }
   const read: FenceRead = segmented ? fenceReadOf(segmented.blocks) : readFenceBlocks(page, 'facts');
-  return { fenceRows: parsed.facts.length, read, extracted, matched, stale, updates, toInsert, chain, inSync };
+  return { fenceRows: parsed.facts.length, read, extracted, matched, stale: retired, updates, toInsert, kept, chain, inSync };
 }
 
 /**
@@ -528,6 +557,7 @@ async function writeFenceReconcile(tx: BrainEngine, sourceId: string, slug: stri
         f.claim_metric ?? null, f.claim_value ?? null, f.claim_unit ?? null, f.claim_period ?? null],
     );
   }
+  await moveKeptRows(tx, sourceId, slug, plan.kept, writes.inserts.map(f => f.row_num));
   const { inserted, allowed } = await insertReconciledFacts(tx, sourceId, slug, writes.inserts, derivation, tally);
   const insertedRows = new Set(allowed.map(f => f.row_num));
   const linked = await syncSupersession(tx, sourceId, slug, plan.extracted, plan.chain, insertedRows);
@@ -588,7 +618,7 @@ export async function prepareFenceFactsReconcile(engine: BrainEngine, row: Write
     apply: async tx => {
       const current = await tx.getPage(row.slug, { sourceId: row.source_id });
       const warnings: string[] = [];
-      const plan = current ? await planFenceReconcile(tx, current, row.slug, row.source_id, warnings) : null;
+      const plan = current ? await planFenceReconcile(tx, current, row.slug, row.source_id, warnings, true) : null;
       if (!plan || plan.inSync) return { status: 'completed', inserted: 0, updated: 0, deleted: 0, deferred: false, warnings };
       const signature = await resolveManagedFactsEmbedding(tx, config, true);
       const vectors = new Map((intent?.embeddings ?? [])
@@ -709,10 +739,12 @@ export interface ExtractFactsResult {
   legacyPages: string[];
   /** Unfenced rows this run appended to their page's fence and stamped with a row number (#5299). */
   unfencedRowsFenced: number;
+  /** GST-2492: facts held on memory/unattributed this run moved into their new entity page (present only when it moved any). */
+  heldFactsMoved?: number;
   /** Active fence-owned rows expired because their page was soft-deleted. */
   factsExpiredForDeletedPages: number;
   guardTriggered: boolean;
-  /** Pages whose reconcile threw and rolled back; later pages still ran. */
+  /** Pages whose fence write or reconcile threw and rolled back; later pages still ran. */
   pagesFailed: number;
   warnings: string[];
   /** #5575 B3: new fence rows the write gate flagged, held or rejected; present only when it did any. */
@@ -814,6 +846,7 @@ export async function runExtractFacts(
   // fenced pages join this run's reconcile below.
   let fencedSlugs: string[] = [];
   let unboundRefused = new Set<string>();
+  let fenceStepFailed = false;
   if (!opts.dryRun) {
     try {
       const fence = await fenceUnfencedFacts(engine, await planUnfencedFacts(engine, { sourceId }), { pageLockRoot: opts.pageLockRoot });
@@ -821,8 +854,20 @@ export async function runExtractFacts(
       fencedSlugs = fence.fenced_slugs;
       unboundRefused = new Set(fence.unbound_refused.map(page => page.slug));
       for (const page of [...fence.failed_pages, ...fence.missing_files]) result.warnings.push(`FACTS_FENCE_FAILED: ${page}`);
+      result.pagesFailed += fence.write_errors;
     } catch (e) {
+      fenceStepFailed = !isFenceHold(e);
       result.warnings.push(`FACTS_FENCE_FAILED: ${(e instanceof Error ? e.message : String(e)).slice(0, 300)}`);
+    }
+    // GST-2492: facts a strict source held on memory/unattributed move into their entity page once it exists.
+    try {
+      const held = await moveHeldFacts(engine, sourceId);
+      if (held.moved) result.heldFactsMoved = held.moved;
+      result.pagesFailed += held.write_errors;
+      for (const row of held.unmovable) result.warnings.push(`HELD_FACT_UNMOVABLE: ${row.slug} facts ${row.fact_ids.join(',')} (${row.reason})`);
+    } catch (e) {
+      fenceStepFailed ||= !isFenceHold(e);
+      result.warnings.push(`HELD_FACT_UNMOVABLE: ${(e instanceof Error ? e.message : String(e)).slice(0, 300)}`);
     }
   }
 
@@ -982,7 +1027,7 @@ export async function runExtractFacts(
     revision = page.knowledge_revision ?? null;
     // #6259: a quarantined page projects no fence facts; its existing index is left as it is.
     if (isQuarantined(page.frontmatter as Record<string, unknown> | null)) return 'skipped';
-    const plan = await planFenceReconcile(engine, page, slug, sourceId, result.warnings);
+    const plan = await planFenceReconcile(engine, page, slug, sourceId, result.warnings, managed);
     if (!plan) return 'invalid';
     if (plan.fenceRows > 0) result.pagesWithFacts += 1;
     if (opts.dryRun) return 'skipped';
@@ -1133,7 +1178,7 @@ export async function runExtractFacts(
       kind: 'facts.fence',
       source_id: sourceId,
       cost_delta: 0,
-      ...classifyRunStop({ error: result.pagesFailed > 0 ? 'item_error' : false }),
+      ...classifyRunStop({ error: fenceStepFailed || result.pagesFailed > 0 ? 'item_error' : false }),
     });
   }
 

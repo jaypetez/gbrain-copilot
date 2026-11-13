@@ -113,7 +113,14 @@ Every source row stores `config.federated: boolean` in its JSONB config.
 The seeded `default` source is `federated=true` so single-source brains
 behave as you'd expect — every page appears in search.
 
-Flip later with `gbrain sources federate <id>` / `unfederate <id>`.
+Flip later with `gbrain sources federate <id>` / `unfederate <id>`. Federating
+a source (or restoring it, which re-federates) lets every connection with no
+source grant read it, including pages a member-bound credential wrote there
+without `readable_by`. The command still federates, and it lists the pages a
+remote token or OAuth client wrote there without readers (count, a few slugs
+with the member each credential is bound to now, `pages_exposed` under `--json`)
+with `gbrain access who-can-read` to check one and `gbrain access rule add` to
+keep a folder to its member.
 
 ### An unscoped connection whose sources hold no pages
 
@@ -207,11 +214,21 @@ member's token. This is the supported production setup today: one
 never learns who is asking from the request itself.
 
 ```bash
-gbrain auth create bot-alice-example
+gbrain auth create bot-alice-example --member alice-example
 gbrain auth rescope --token bot-alice-example --sources source-a
 # OAuth client instead of a bearer token:
-gbrain auth rescope --client <client_id> --sources source-a
+gbrain auth rescope --client <client_id> --sources source-a --member alice-example
 ```
+
+Once the brain has two or more enabled members (or config `access.serves` is
+`several`), a remote read through a token, OAuth client or stdio server bound to
+no member is refused with
+[`requester_scope_required`](write-refusals.md#requester_scope_required), and
+`gbrain auth create` refuses an unbound token. A connection that existed when the
+brain started serving several people reads for 14 more days, with a notice on
+every answer (`_meta.access.requester_scope`) naming the date and the command that
+binds it. Bind every member's token with `--member`. A brain for one person sees
+no change, however many sources it holds.
 
 The token's grant is the security boundary: the server scopes every call to
 the grant of the token that made it, whatever the call's arguments say.
@@ -220,6 +237,13 @@ granted several sources can pass `source_ids` to keep one request to the
 current member's sources, but a prompt-injected or buggy bot can omit it, so
 it does not separate members who must not see each other's pages. Use
 per-member tokens for that, and `source_ids` to narrow further.
+
+A trusted system that names the person on each call (QM's `x-qm-actor`) can
+share one client instead: grant it every member's source and bind each source
+to its member (`gbrain access member source add alice-example dm-alice-example`).
+An attested call then reads the grant minus sources bound to other members,
+and binding never adds a source to a grant
+([QM guide](qm.md#each-persons-own-sources)).
 
 ### Lay out sources by who may read them
 
@@ -244,7 +268,30 @@ who may read it, before any member's bot connects:
   ```
 
   The first id is the token's write source, so a member's saved memories land
-  in their own private source.
+  in their own private source. Keep that source unfederated: federating it
+  later makes the pages already written there readable by every credential
+  without a source grant, since they carry no `readable_by`.
+
+  A credential bound to a member (`--member`) whose write source is `default`
+  (a token with no `--sources` or with `--sources default`, or an OAuth client
+  left at its registration default) or a federated source writes where every
+  credential without a source grant reads. A page such a credential creates is therefore written
+  with `readable_by: [member:<id>]`, readable only by that member (and the
+  local CLI); rewriting it without `readable_by` keeps those readers, and the
+  member shares it by naming readers (`readable_by: [alice-example,
+  group:team-a]`). An edit to an existing page that names no readers leaves it
+  shared. `POST /ingest` refuses such a credential. Pages derived from such a
+  page (extracted atoms, chronicle events, `derived_from` pages, and a
+  synthesized concept that uses it) are readable by no remote caller, the
+  writer included. A page teammates should read (a shared `people/` or
+  `companies/` page, or a page in a folder a rule scopes to a group) names its
+  readers when it is created; otherwise the first member to create a slug
+  keeps it, and every other remote credential writing that slug gets
+  `page_not_found` until the operator adds `readable_by` on the brain host.
+  Before this release those
+  pages named no readers, so other members and unbound tokens read them:
+  check pages a member wrote with `gbrain access who-can-read <slug>` and add
+  `readable_by` on the brain host to any that should stay private.
 - **Let each member read their own private pages (optional).** Remote
   reads hide every `visibility: private` page by default, even in a granted
   source. To let a member's agent read the private pages in the sources its
@@ -263,6 +310,10 @@ who may read it, before any member's bot connects:
   whose declared lineage is private; pinned questions stay owner-only.
   `--private-pages none` hides them again on the next request, and
   `gbrain auth list` shows each token's setting.
+- **On a personal brain, name the owner instead.** `gbrain access owner set
+  <member>` lets every credential bound to that member read the private pages
+  in all the sources its grant reads. What each designation means for each
+  caller: [access designations](access-designations.md).
 
 > **Warning: one shared source has no boundary inside it.** A bot that answers
 > everyone with one unscoped token over a single source exposes everything in
@@ -375,6 +426,10 @@ gbrain sources federate <id>
 gbrain sources unfederate <id>
 gbrain sources mirror-readonly <id>
 gbrain sources mirror-writable <id>
+gbrain sources record-origin <id>... --remote|--local [--apply] [--json]
+                               Record who added older URL sources (doctor
+                               url_source_origin); preview unless --apply. See
+                               docs/guides/repair.md#url-source-origin.
 gbrain sources refresh <id> [--dry-run] [--resume|--abandon]   Managed brains: fast-forward the checkout and sync.
 gbrain sources set-strategy <id> <markdown|code|auto>
 gbrain sources set-sync <id> <on|off> [--dry-run] [--expect <on|off>]

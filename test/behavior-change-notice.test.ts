@@ -39,7 +39,6 @@ import {
   takeLocalBehaviorNotice,
 } from '../src/core/behavior-change-notice.ts';
 import { cliRenderContext, renderNotice } from '../src/core/agent-output.ts';
-import { VERSION } from '../src/version.ts';
 import { checkBehaviorChanges } from '../src/commands/doctor/checks/behavior-changes.ts';
 import { dispatchToolCall } from '../src/mcp/dispatch.ts';
 
@@ -110,7 +109,7 @@ for (const backend of testBackends()) {
       const home = freshHome();
       await withEnv({ GBRAIN_HOME: home, ...NO_CHAIN }, async () => {
         expect(await takeLocalBehaviorNotice(engine, 'cli', { cfg: null, brainKey: 'fresh' })).toBeNull();
-        expect(readFileSync(join(noticeDir(home), 'fresh.baseline'), 'utf8').trim()).toBe(VERSION);
+        expect(readFileSync(join(noticeDir(home), 'fresh.baseline'), 'utf8').trim()).toBe(BEHAVIOR_NOTICE_SINCE);
         await setCreated(engine, 2 * DAY);
         __resetBehaviorNoticeForTests();
         expect(await takeLocalBehaviorNotice(engine, 'stdio', { cfg: null, brainKey: 'fresh' })).toBeNull();

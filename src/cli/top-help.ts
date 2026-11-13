@@ -124,6 +124,7 @@ TOOLS
   compile-context --target <t>       Compile a deterministic, scanned, budgeted context
         [--budget N] [--check]       file (claude-code | codex | openclaw)
   decide <status|probe|enable|...>   System One decision support (Jev); every slot off by default
+  memory-proposals list|show|approve|deny  QM's proposed timeline entries and links awaiting your decision
   facts relink [--dry-run]           Link facts saved without an entity to the entity they name
   check-resolvable [--json] [--fix]  Validate skill tree (reachability/MECE/DRY)
   skillpack <list|scaffold|...>      Manage bundled skills (scaffold into repo, reference diffs, harvest)

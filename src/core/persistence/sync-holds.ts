@@ -87,6 +87,8 @@ export type GitHoldCode = ContentRefusal['code'] | 'rename_held' | 'parser_regre
   | 'frontmatter_alias_limit'
   /** GBRA-133 S-39: a Markdown file whose text holds a NUL byte (U+0000): a binary file, a padded file, a UTF-16 save. */
   | 'content_null_bytes'
+  /** GST-2312 (#9024): a committed blob a Git filter owns (git-crypt, a clean/smudge driver); sync never runs the filter. */
+  | 'content_filter_owned'
   /** GBRA-133 S-33: a committed file whose Git blob the repository no longer has, and whose working-tree copy differs or is gone. */
   | 'git_object_missing'
   /** GBRA-133 S-7: a committed file whose name is not valid UTF-8, so no Git read or file finds it by its decoded name. */
@@ -456,7 +458,7 @@ export async function clearDeletionHold(tx: Exec, input: { sourceId: string; inc
   return clearGitHold(tx, { ...input, observedAt: hold.observed_at });
 }
 
-/** GBRA-133: a deleted-side `file_drift` hold whose file is gone from the level and the disk (sync-pass.ts `deletionCandidates`). */
+/** GBRA-133: a deleted-side `file_drift` or a `concurrent_write` hold whose file is gone from the level and the disk (sync-pass.ts `deletionCandidates`). */
 export interface DeletionCandidate { path: string; page_id: number | null; slug: string | null }
 
 /**
@@ -607,8 +609,11 @@ export async function holdBasisMoved(engine: Pick<BrainEngine, 'executeRaw'>, so
  * #8072: a `file_too_large` hold is re-screened by every sync only while that costs its size (an lstat): one the streamed
  * preparation refused after reading the whole file (`meta.streamed`) waits for its bytes to change, a retry or another gbrain.
  */
-/** GBRA-133: the `file_drift` screen version; 1 is #7340's rule (a page with no import record compares its file at the baseline commit). */
-export const FILE_DRIFT_VERSION = 1;
+/**
+ * GBRA-133: the `file_drift` screen version; 1 is #7340's rule (a page with no import record compares its file at the baseline commit),
+ * 2 adds the path's earlier committed versions (`driftHistory`), which landed after version 1 without re-screening its holds.
+ */
+export const FILE_DRIFT_VERSION = 2;
 
 export function holdRescreenDue(record: Pick<GitHoldRecord, 'code' | 'meta'>, retried: boolean): boolean {
   return retried || (record.code === 'file_too_large' && record.meta.streamed?.gbrain_version !== VERSION) || ['frontmatter_slug_conflict', 'rename_held', 'parser_regression', 'content_rejected', 'write_gate_rejected', 'purged_content', 'legacy_slug_conflict', 'origin_conflict', 'page_identity_changed', 'git_object_missing'].includes(record.code)
@@ -678,7 +683,7 @@ export function holdRepairSteps(sourceId: string, route: HoldRepairRoute, auto?:
   const dirtyText = `the ${route.dirty ?? 0} worktree-dirty hold(s) are uncommitted edits in the checkout that sync would not overwrite: commit them (gbrain sources status ${sourceId} names each file), `
     + `then run ${unblock.join(' ')}, which re-screens every held file that is now committed, and the same sync`;
   const driftText = `for each file-drift hold, preview the resolution with gbrain repair file-drift --source ${sourceId} --slug <slug> --prefer database (or --prefer file) `
-    + `(gbrain sources status ${sourceId} names each slug and the database write sync did not overwrite), decide with the user, apply it with the plan hash, then run gbrain sync --source ${sourceId} --no-pull`;
+    + `(gbrain sources status ${sourceId} names each slug and the database write sync did not overwrite) and decide with the user. ${FILE_DRIFT_APPLY_STEP} Then run gbrain sync --source ${sourceId} --no-pull`;
   if (route.stalled && !route.others && !content && !route.concurrent && !route.dirty && !route.drift) {
     return { argv: stalled.status, commands: [stalled.status.join(' '), stalled.retry.join(' '), stalled.sync.join(' ')], text: stalledText };
   }
@@ -742,11 +747,19 @@ function deletedDriftFix(record: Pick<GitHoldRecord, 'source_id' | 'path' | 'met
   const options = `This preview (writes nothing) shows --prefer database: ${fileDriftActionVerb('deleted', state, 'database')}; ${preview('file').join(' ')} previews --prefer file: `
     + `${fileDriftActionVerb('deleted', state, 'file')}. `;
   return { argv: preview('database'), consent: [], actor: 'agent', requires_exclusive: false, docs: 'docs/guides/repair.md#deleted-canonical-files',
-    why: `${what}${options}Decide with the user, run the apply command the preview prints, then sync again. The rest of the source is not blocked.`,
+    why: `${what}${options}Decide with the user. ${FILE_DRIFT_APPLY_STEP} Then sync again. The rest of the source is not blocked.`,
     then: { argv: ['gbrain', 'sync', '--source', source, '--no-pull'], consent: [], actor: 'agent', requires_exclusive: false, verify,
       why: `Re-screens ${record.path} after the repair (a changed file or page revision re-screens it by itself).` },
     verify };
 }
+
+/**
+ * GST-2579: what every printed file-drift fix says about the step after its read-only preview. A database-wins apply
+ * replaces the file, so it is the user's decision (ask_user): the CLI asks for consent and the apply takes --yes only after they agree.
+ */
+export const FILE_DRIFT_APPLY_STEP = 'The preview writes nothing and names what the winning side overwrites: in bulk, --prefer database keeps every file edit or deletion sync never imported '
+  + '(kept_newer_file, kept_newer_delete), and a page named with --slug lists the commit it would discard. The apply it prints replaces the other copy and needs the user\'s consent: '
+  + 'show them what the preview names, run the apply without --yes to get its consent message (exit 3), and add --yes only after they agree.';
 
 /**
  * The exact next step for one hold: the repair preview for frontmatter, the
@@ -815,7 +828,7 @@ export function gitHoldFix(record: Pick<GitHoldRecord, 'source_id' | 'path' | 'c
         const verify = { argv: ['gbrain', 'sources', 'status', source, '--json'] };
         return { argv: preview('database'), consent: [], actor: 'agent', requires_exclusive: false, docs: 'docs/guides/repair.md#deleted-canonical-files',
           why: `${record.path} was deleted in Git while ${by}, so sync held the deletion instead of removing a page that changed. This preview (writes nothing) keeps the page and recreates its file; `
-            + `${preview('file').join(' ')} previews the deletion instead (soft-deletes exactly that page). Decide with the user, run the apply command the preview prints, then sync again. The rest of the source is not blocked.`,
+            + `${preview('file').join(' ')} previews the deletion instead (soft-deletes exactly that page). Decide with the user. ${FILE_DRIFT_APPLY_STEP} Then sync again. The rest of the source is not blocked.`,
           then: { argv: ['gbrain', 'sync', '--source', source, '--no-pull'], consent: [], actor: 'agent', requires_exclusive: false, verify,
             why: `Re-screens ${record.path} after the repair (a changed file or page revision re-screens it by itself).` },
           verify };
@@ -839,7 +852,7 @@ export function gitHoldFix(record: Pick<GitHoldRecord, 'source_id' | 'path' | 'c
         ? `Page ${slug} differs from ${record.path} and has no import record to tell whether the file or the database changed, so sync held the file instead of overwriting the database version. `
         : `${by} since ${record.path} was last imported, so sync held the file instead of overwriting the database version (${record.meta.sides === 'database' && !record.meta.side ? 'the file did not change in Git'
           : side === 'both' ? 'the file changed too' : 'no import record says whether the file changed too'}). `;
-      const decide = 'Decide with the user which version wins, run the apply command the preview prints, then sync again. The rest of the source is not blocked.';
+      const decide = `Decide with the user which version wins. ${FILE_DRIFT_APPLY_STEP} Then sync again. The rest of the source is not blocked.`;
       // #6517: a shared-origin delete kept the file for this surviving page, and its receipt names importing the file.
       const shared = record.meta.shared_origin === true;
       return { argv: preview(shared ? 'file' : 'database'), consent: [], actor: 'agent', requires_exclusive: false, docs: 'docs/guides/write-refusals.md#file_drift',
@@ -908,9 +921,14 @@ export function gitHoldFix(record: Pick<GitHoldRecord, 'source_id' | 'path' | 'c
         user_message: `${record.path} holds NUL bytes (U+0000${record.meta.line !== undefined ? `, first on line ${record.meta.line}` : ''}), so sync holds it and the rest of source ${source} keeps syncing. A UTF-16 file (a Windows "Unicode" save) looks like this: save it as UTF-8. Otherwise remove the NUL bytes, or remove a binary file (or leave it out with sync.exclude), then commit and run gbrain sync --source ${source} --no-pull.`,
         why: 'Page text is stored as UTF-8 without NUL bytes, so these bytes cannot be imported as they stand; the hold re-screens when the file changes.',
         verify: { argv: ['gbrain', 'sources', 'status', source, '--json'] } };
+    case 'content_filter_owned':
+      return { argv: ['gbrain', 'sources', 'status', source, '--json'], consent: [], actor: 'user', requires_exclusive: false, docs: gitHoldDocs(record.code),
+        user_message: `${record.path} is stored in Git through a filter (git-crypt encryption or another clean/smudge driver), so its committed bytes are not the text in the checkout. gbrain does not run a repository's filter programs during sync, so sync holds it and the rest of source ${source} keeps syncing. Leave it out with sync.exclude, or commit it without the filter so Git stores its text, then run gbrain sync --source ${source} --no-pull. If the filter is not in use and the file is plain text, remove the filter attribute from .gitattributes, commit, and run gbrain sources retry-held ${source}: a commit that changes only .gitattributes does not re-screen the file.`,
+        why: "Running a repository's filter programs would let the repository run code during sync, so the stored bytes cannot become the page; the hold re-screens when the file changes or on gbrain sources retry-held.",
+        verify: { argv: ['gbrain', 'sources', 'status', source, '--json'] } };
     case 'git_object_missing':
       return { argv: ['gbrain', 'sources', 'status', source, '--json'], consent: [], actor: 'user', requires_exclusive: false, docs: gitHoldDocs(record.code),
-        user_message: `The Git object of ${record.path}${record.meta.blob_oid ? ` (blob ${record.meta.blob_oid})` : ''} is missing from the checkout of source ${source}, and its working-tree copy differs or is gone, so sync holds it and the rest of the source keeps syncing. Run git fsck in the checkout to see what is missing, restore it with git fetch (a partial or shallow clone) or from a backup, then run gbrain sync --source ${source} --no-pull.`,
+        user_message: `The Git object of ${record.path}${record.meta.blob_oid ? ` (blob ${record.meta.blob_oid})` : ''} is missing from the checkout of source ${source}, and its working-tree copy differs or is gone, so sync holds it and the rest of the source keeps syncing. Sync fetches nothing, so in a partial clone (git clone --filter) fetch the blob with git cat-file -p ${record.meta.blob_oid ?? '<blob>'} in the checkout or check the file out; otherwise run git fsck in the checkout to see what is missing and restore it with git fetch (a shallow clone) or from a backup. Then run gbrain sync --source ${source} --no-pull.`,
         why: 'An interrupted gc, a partial clone without its promisor remote or disk corruption can drop an object a commit still names; nothing is imported from a guess, and every sync re-tests the hold.',
         verify: { argv: ['gbrain', 'sources', 'status', source, '--json'] } };
     case 'path_not_utf8':

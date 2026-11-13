@@ -48,7 +48,7 @@ import { isMissingSchemaObject } from '../core/utils.ts';
 import type { PageType } from '../core/types.ts';
 import { parseMarkdown } from '../core/markdown.ts';
 import { resolveCandidateSources, resolveLinkFallbackDefault, loadLinkPageMetadata, capturedLinkEndpoints, fileLinkOwnership, replaceFileLinks, replacePageFileLinks, type LinkPageMetadata } from '../core/link-reconciliation.ts';
-import { collectWantedLinks, isWantedPagesEnabled } from '../core/wanted-links.ts';
+import { collectWantedLinks, isWantedPagesEnabled, wantedReadAt } from '../core/wanted-links.ts';
 import { readLineGrammarSettings, statedRelationTypes } from '../core/line-grammar.ts';
 import { effectiveLinkExtractorWatermark, linkExtractorWatermarkFor } from '../core/link-extraction-watermark.ts';
 import { concurrentWriteSkipLine, replaceDerivedLinksBatchOrReplay, replaceDerivedLinksDeferringConflicts, settingsChangedSkipLine, unknownSourceSkipLine, type DerivedLinkBatchItem, type UnknownSourceSkip } from '../core/derived-links.ts';
@@ -74,7 +74,7 @@ import { PageRegexBudget } from '../core/schema-pack/redos-guard.ts';
 export { extractTimelineFromContent, type ExtractedTimelineEntry } from '../core/timeline-extract.ts';
 import { extractTimelineFromContent, pruneTimelineOrphans, retractRemovedTimelineEntries, segmentedTimelineText, type ExtractedTimelineEntry } from '../core/timeline-extract.ts';
 import { managedPersistenceEnabled } from '../core/persistence/ownership.ts';
-import { addProjectedTimelineBatch, addProjectedTimelineEntry } from '../core/trust/timeline-projection.ts';
+import { addProjectedPageTimeline, addProjectedTimelineBatch } from '../core/trust/timeline-projection.ts';
 import { createProgress } from '../core/progress.ts';
 import { getCliOptions, cliOptsToProgressOptions } from '../core/cli-options.ts';
 import { pathToSlug, slugifyPath, slugifySegment, readMetafilePagesMode, DEFAULT_METAFILE_PAGES_MODE, type MetafilePagesMode } from '../core/sync.ts';
@@ -1811,10 +1811,9 @@ export async function extractTimelineForSlugs(
   // one `links_extracted_at` stamp, so both must agree on what was read.
   const slugToPath = (opts?.tree ?? await indexMarkdownTree(repoPath, await readMetafilePagesMode(engine))).slugToPath;
   // v0.18.0+ multi-source: source-qualify so timeline rows don't fan out
-  // across every source containing the slug (the addTimelineEntry's
-  // INSERT...SELECT-from-pages fan-out was Data R1's HIGH 2).
-  const entryOpts = opts?.sourceId ? { sourceId: opts.sourceId } : undefined;
-  const quarantined = await quarantinedSlugs(engine, opts?.sourceId ?? 'default');
+  // across every source containing the slug (Data R1's HIGH 2).
+  const sourceId = opts?.sourceId ?? 'default';
+  const quarantined = await quarantinedSlugs(engine, sourceId);
   let created = 0;
   const processed: string[] = [];
   const errors: Array<{ slug: string; error: string }> = [];
@@ -1826,11 +1825,11 @@ export async function extractTimelineForSlugs(
     try {
       const content = readFileSync(filePath, 'utf-8');
       const entries = extractTimelineFromContent(content, slug);
-      await retractRemovedTimelineEntries(engine, slug, opts?.sourceId ?? 'default', content);
-      for (const entry of entries) {
-        await addProjectedTimelineEntry(engine, entry.slug, { date: entry.date, source: entry.source, summary: entry.summary, detail: entry.detail }, entryOpts);
-        created++;
-      }
+      await retractRemovedTimelineEntries(engine, slug, sourceId, content);
+      // #6805: one projected batch per page, whatever its timeline length; a missing page fails it like addTimelineEntry.
+      const page = await addProjectedPageTimeline(engine, sourceId, entries, { auditSite: 'extract.timeline_inc' });
+      created += page.created;
+      if (page.refusal !== undefined) throw page.refusal;
       processed.push(slug);
     } catch (e) { errors.push({ slug, error: e instanceof Error ? e.message : String(e) }); }
   }
@@ -1896,6 +1895,7 @@ async function extractLinksFromDB(
   // cross-source wikilinks (qualified like `[[other-src:slug]]`) can
   // resolve — the filter is on WHICH pages we extract FROM, not what
   // we can resolve TO.
+  const readAt = await wantedReadAt(engine);
   const allRefs = sourceIdFilter
     ? (await engine.listAllPageRefs()).filter(r => r.source_id === sourceIdFilter)
     : await engine.listAllPageRefs();
@@ -2058,7 +2058,7 @@ async function extractLinksFromDB(
         pendingWrites.push({ slug, source_id, item: { origin: { slug, sourceId: source_id, expectedRevision: snapshot.revision,
           sourceIncarnation: snapshot.sourceIncarnation }, links: batch, opts: { includeFrontmatter, lineGrammar: grammar,
           ...(extracted.temporalBody ? { temporalBody: extracted.temporalBody } : {}),
-          wanted: { producers: includeFrontmatter ? ['body', 'frontmatter'] : ['body'], rows: wanted },
+          wanted: { producers: includeFrontmatter ? ['body', 'frontmatter'] : ['body'], rows: wanted, readAt },
           expectedEndpoints: capturedLinkEndpoints(batch, targetMetadata, { slug, sourceId: source_id }) } } });
       } catch (error) {
         if (jsonMode) process.stderr.write(JSON.stringify({ event: 'batch_error', size: batch.length, code: 'graph_write_failed' }) + '\n');
@@ -2197,7 +2197,7 @@ export async function extractStaleFromDB(
   // #4611: mirrors extractLinksFromDB — configured default, resolved once.
   const linkDefaultSourceId = await resolveLinkFallbackDefault(engine);
   // Nothing link-stale: skip the whole-brain resolver reads; the mention pass still runs.
-  const allRefs = totalStale ? await engine.listAllPageRefs() : [];
+  const [readAt, allRefs] = [await wantedReadAt(engine), totalStale ? await engine.listAllPageRefs() : []];
   const allSlugs = new Set<string>();
   const slugToSources = new Map<string, string[]>();
   for (const ref of allRefs) {
@@ -2312,7 +2312,7 @@ export async function extractStaleFromDB(
           crossSourceAllowed: federatedSourceIds.has(page.source_id) || crossSource, resolve: c => resolveCandidateSources(c, page.slug,
             page.source_id, allSlugs, slugToSources, federatedSourceIds.has(page.source_id), { crossSource, defaultSourceId: linkDefaultSourceId }) }) : [];
         const linkOpts = { includeFrontmatter, lineGrammar: grammar, expectedEndpoints: capturedLinkEndpoints(linkRows, targetMetadata, origin),
-          wanted: { producers: includeFrontmatter ? ['body', 'frontmatter'] as const : ['body'] as const, rows: wanted },
+          wanted: { producers: includeFrontmatter ? ['body', 'frontmatter'] as const : ['body'] as const, rows: wanted, readAt },
           ...(extracted.temporalBody ? { temporalBody: extracted.temporalBody } : {}) };
         const stampIso = page.updated_at.getTime() >= Date.parse(versionTs) ? page.updated_at_iso : versionTs;
         const written = await replaceDerivedLinksDeferringConflicts(engine, origin, linkRows, linkOpts);
